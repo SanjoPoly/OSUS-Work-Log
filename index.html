@@ -1,0 +1,1863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSUS Work Log</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+        colors: { brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' } }
+      } }
+    };
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; -webkit-font-smoothing:antialiased; }
+    .custom-scrollbar::-webkit-scrollbar { width:6px; height:6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background:#f1f5f9; border-radius:4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+    @keyframes pulseDot { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.35); opacity:.6; } }
+    .pulse-dot { animation: pulseDot 2s cubic-bezier(.4,0,.6,1) infinite; }
+    .tab-btn.active { color:#4f46e5; border-color:#4f46e5; background:#eef2ff; font-weight:700; }
+    .cat-btn.active { background:#0f172a; color:#fff; border-color:#0f172a; }
+    .seg-btn.active { background:#fff; color:#0f172a; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+    .clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .tag-pick input:checked + span { background:#4f46e5; color:#fff; border-color:#4f46e5; }
+    .tag-pick input:focus-visible + span { outline:2px solid #6366f1; outline-offset:2px; }
+    th[data-sort] { cursor:pointer; user-select:none; }
+    th[data-sort]:hover { color:#4338ca; }
+    select:disabled, button:disabled { opacity:.55; cursor:not-allowed; }
+  </style>
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
+
+  <!-- Demo-mode banner -->
+  <div id="demoBanner" class="hidden bg-amber-50 border-b border-amber-200 text-amber-900 text-[11px] sm:text-xs px-4 py-2 text-center">
+    <strong>Demo mode</strong> — data is saved only in this browser.
+    <button type="button" id="btnLeaveDemo" class="ml-1 underline font-semibold hover:text-amber-700">Switch to the shared GitHub database</button>
+  </div>
+  <div id="configError" class="hidden bg-rose-50 border-b border-rose-200 text-rose-800 text-xs px-4 py-2 text-center"></div>
+
+  <!-- ============ AUTH VIEW ============ -->
+  <section id="authView" class="hidden min-h-[90vh] flex items-center justify-center p-4">
+    <div class="w-full max-w-sm">
+      <div class="flex flex-col items-center mb-6">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-brand-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+          <i data-lucide="layers" class="w-6 h-6"></i>
+        </div>
+        <h1 class="mt-3 text-xl font-extrabold tracking-tight text-slate-900">OSUS Work Log</h1>
+        <p class="text-xs text-slate-500 mt-1">Development · Support · Report tracker</p>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
+        <!-- No database connection on this device yet -->
+        <div id="setupChoice" class="hidden space-y-3 text-center">
+          <div class="w-10 h-10 mx-auto rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center"><i data-lucide="database" class="w-5 h-5 text-indigo-600"></i></div>
+          <p class="text-sm font-semibold text-slate-800">Not connected to a database yet</p>
+          <p class="text-xs text-slate-500">The work log is an Excel file in a private GitHub repo. An admin connects it once and publishes <code class="font-mono text-[11px]">worklog-config.json</code> next to this page.</p>
+          <button type="button" data-auth-tab="setup" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg">Set up connection (admin)</button>
+          <button type="button" id="btnTryDemo" class="w-full py-2 bg-white border border-slate-300 hover:bg-slate-50 text-sm font-semibold rounded-lg">Try demo (this browser only)</button>
+        </div>
+
+        <!-- Admin: one-time connection to the Excel database -->
+        <form id="formSetup" class="hidden space-y-3">
+          <div>
+            <p class="text-sm font-semibold text-slate-800">Connect the Excel database</p>
+            <p class="text-[11px] text-slate-500 mt-0.5">One-time admin step. If the file doesn't exist yet, it is created for you.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="setRepo">Private data repository</label>
+            <input id="setRepo" type="text" required placeholder="owner/osus-worklog-data" autocomplete="off" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1" for="setPath">Excel file path</label>
+              <input id="setPath" type="text" value="OSUS_WorkLog_DB.xlsx" autocomplete="off" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1" for="setBranch">Branch</label>
+              <input id="setBranch" type="text" value="main" autocomplete="off" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="setToken">GitHub access token</label>
+            <input id="setToken" type="password" required autocomplete="off" placeholder="github_pat_…" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <p class="text-[10px] text-slate-400 mt-1">Fine-grained token · only this repo · Contents: Read and write.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="setKey">Team access key</label>
+            <input id="setKey" type="password" required autocomplete="new-password" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <input id="setKey2" type="password" required autocomplete="new-password" placeholder="Repeat the team access key" class="mt-2 w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <p class="text-[10px] text-slate-400 mt-1">Encrypts the token in the config file. Everyone types it once per device. Use 4+ random words.</p>
+          </div>
+          <button type="submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg">Connect &amp; check file</button>
+          <button type="button" data-auth-tab="choice" class="w-full text-[11px] text-slate-500 hover:text-indigo-700">Back</button>
+        </form>
+
+        <div id="setupDone" class="hidden space-y-3">
+          <div class="flex items-center gap-2 text-emerald-700"><i data-lucide="check-circle-2" class="w-5 h-5"></i><span class="text-sm font-semibold">Connected</span></div>
+          <p id="setupDoneMsg" class="text-xs text-slate-600"></p>
+          <ol class="text-xs text-slate-600 list-decimal pl-4 space-y-1">
+            <li>Download the config file below.</li>
+            <li>Upload it to the <b>website</b> repo, next to <code class="font-mono text-[11px]">index.html</code>.</li>
+            <li>Share the team access key with your team privately (not in the repo).</li>
+          </ol>
+          <button type="button" id="btnDownloadCfg" class="w-full py-2 bg-white border border-slate-300 hover:bg-slate-50 text-sm font-semibold rounded-lg flex items-center justify-center gap-1.5"><i data-lucide="download" class="w-4 h-4"></i>Download worklog-config.json</button>
+          <button type="button" data-auth-tab="signup" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg">Continue — create your account</button>
+        </div>
+
+        <div id="authTabs" class="grid grid-cols-2 p-1 mb-4 bg-slate-100 rounded-lg text-xs font-semibold">
+          <button type="button" data-auth-tab="signin" class="seg-btn active py-1.5 rounded-md text-slate-600">Sign in</button>
+          <button type="button" data-auth-tab="signup" class="seg-btn py-1.5 rounded-md text-slate-600">Create account</button>
+        </div>
+
+        <div id="teamKeyBox" class="hidden mb-3 p-3 rounded-lg bg-indigo-50/70 border border-indigo-100">
+          <label for="teamKey" class="block text-xs font-semibold text-indigo-900 mb-1">Team access key</label>
+          <input id="teamKey" type="password" autocomplete="off" class="w-full text-sm px-3 py-2 bg-white border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <p class="text-[10px] text-indigo-700/80 mt-1">Needed once on each device. Ask your admin for it.</p>
+        </div>
+
+        <form id="formSignIn" class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="siEmail">Email</label>
+            <input id="siEmail" type="email" required autocomplete="email" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="siPassword">Password</label>
+            <input id="siPassword" type="password" required autocomplete="current-password" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <button type="submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm">Sign in</button>
+          <p class="text-[11px] text-slate-400 text-center">Forgot your password? Ask an admin to reset it.</p>
+        </form>
+
+        <form id="formSignUp" class="hidden space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="suName">Full name <span class="font-normal text-slate-400">(shown as consultant name)</span></label>
+            <input id="suName" type="text" required autocomplete="name" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="suEmail">Work email</label>
+            <input id="suEmail" type="email" required autocomplete="email" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="suPassword">Password <span class="font-normal text-slate-400">(min 8 characters)</span></label>
+            <input id="suPassword" type="password" required minlength="8" autocomplete="new-password" class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <button type="submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm">Create account</button>
+          <p class="text-[11px] text-slate-400 text-center">The first account becomes admin. Everyone else needs an admin's approval.</p>
+        </form>
+
+        <p id="authMsg" class="hidden mt-3 text-xs rounded-lg px-3 py-2"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PENDING APPROVAL VIEW ============ -->
+  <section id="pendingView" class="hidden min-h-[90vh] flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-sm p-6 text-center">
+      <div class="w-11 h-11 mx-auto rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
+        <i data-lucide="hourglass" class="w-5 h-5 text-amber-600"></i>
+      </div>
+      <h2 class="mt-3 text-base font-bold text-slate-900">Waiting for approval</h2>
+      <p id="pendingMsg" class="mt-1 text-xs text-slate-500">Your account is created. An admin needs to approve it before you can access the work log.</p>
+      <div class="mt-4 flex gap-2 justify-center">
+        <button id="btnPendingRefresh" class="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Check again</button>
+        <button data-signout class="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 rounded-lg">Sign out</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ APP VIEW ============ -->
+  <div id="appView" class="hidden min-h-screen flex flex-col">
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+      <div class="max-w-[1400px] mx-auto px-3 sm:px-6">
+        <div class="flex items-center justify-between h-16 gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-brand-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
+              <i data-lucide="layers" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h1 class="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">OSUS Work Log</h1>
+                <span id="liveBadge" class="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                  <span id="liveDot" class="w-1.5 h-1.5 rounded-full bg-slate-400"></span><span id="liveText">Connecting</span>
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-500 hidden md:block">Development · Support · Report — one shared log</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 sm:gap-2">
+            <button id="btnNewLog" data-needs-edit class="px-2.5 sm:px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>New<span class="hidden sm:inline"> Log</span></span>
+            </button>
+            <button id="btnImport" data-needs-edit title="Import from Excel" class="p-1.5 sm:px-2.5 sm:py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs flex items-center gap-1">
+              <i data-lucide="upload" class="w-4 h-4"></i><span class="hidden lg:inline font-medium">Import</span>
+            </button>
+            <button id="btnExport" title="Export to Excel" class="p-1.5 sm:px-2.5 sm:py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs flex items-center gap-1">
+              <i data-lucide="download" class="w-4 h-4"></i><span class="hidden lg:inline font-medium">Export</span>
+            </button>
+            <input type="file" id="importFile" accept=".xlsx,.xls,.csv" class="hidden" />
+
+            <div class="relative" id="userMenuWrap">
+              <button id="btnUserMenu" class="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg hover:bg-slate-100 border border-transparent hover:border-slate-200">
+                <span id="userAvatar" class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center justify-center uppercase">?</span>
+                <span class="hidden md:flex flex-col items-start leading-tight">
+                  <span id="userName" class="text-xs font-semibold text-slate-800"></span>
+                  <span id="userRole" class="text-[10px] text-slate-400 capitalize"></span>
+                </span>
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
+              </button>
+              <div id="userMenu" class="hidden absolute right-0 mt-1 w-52 bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 text-xs z-50">
+                <div class="px-2.5 py-2 border-b border-slate-100 mb-1">
+                  <div id="userMenuName" class="font-semibold text-slate-800 truncate"></div>
+                  <div id="userMenuEmail" class="text-[11px] text-slate-400 truncate"></div>
+                </div>
+                <button id="btnChangePw" class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-100 flex items-center gap-2"><i data-lucide="key-round" class="w-3.5 h-3.5"></i> Change password</button>
+                <button data-signout class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2">
+                  <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-[1400px] mx-auto px-3 sm:px-6 py-5 flex-1 w-full space-y-5">
+      <div class="border-b border-slate-200 overflow-x-auto">
+        <nav class="flex gap-2 sm:gap-3" aria-label="Tabs">
+          <button data-tab="dashboard" class="tab-btn active px-3 sm:px-4 py-2 border-b-2 border-transparent text-xs sm:text-sm font-medium rounded-t-lg text-slate-500 hover:text-slate-700 flex items-center gap-2 whitespace-nowrap">
+            <i data-lucide="layout-grid" class="w-4 h-4"></i>Dashboard
+          </button>
+          <button data-tab="log" class="tab-btn px-3 sm:px-4 py-2 border-b-2 border-transparent text-xs sm:text-sm font-medium rounded-t-lg text-slate-500 hover:text-slate-700 flex items-center gap-2 whitespace-nowrap">
+            <i data-lucide="list-checks" class="w-4 h-4"></i>Work Log
+            <span id="badgeLog" class="px-1.5 rounded-full text-[10px] bg-slate-200 text-slate-700 font-bold">0</span>
+          </button>
+          <button data-tab="reports" class="tab-btn px-3 sm:px-4 py-2 border-b-2 border-transparent text-xs sm:text-sm font-medium rounded-t-lg text-slate-500 hover:text-slate-700 flex items-center gap-2 whitespace-nowrap">
+            <i data-lucide="file-bar-chart" class="w-4 h-4"></i>Reports
+            <span id="badgeReports" class="px-1.5 rounded-full text-[10px] bg-purple-100 text-purple-700 font-bold">0</span>
+          </button>
+          <button data-tab="team" id="tabTeamBtn" class="hidden tab-btn px-3 sm:px-4 py-2 border-b-2 border-transparent text-xs sm:text-sm font-medium rounded-t-lg text-slate-500 hover:text-slate-700 flex items-center gap-2 whitespace-nowrap">
+            <i data-lucide="users" class="w-4 h-4"></i>Team
+            <span id="badgePending" class="hidden px-1.5 rounded-full text-[10px] bg-amber-100 text-amber-700 font-bold">0</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- DASHBOARD -->
+      <section id="view-dashboard" class="space-y-5">
+        <div id="kpiGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"></div>
+        <div id="catCards" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+            <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">Status distribution</h3>
+            <div class="h-60 relative"><canvas id="chartStatus"></canvas></div>
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+            <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">Consultant workload</h3>
+            <div class="h-60 relative"><canvas id="chartWorkload"></canvas></div>
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+            <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">Hours by consultant</h3>
+            <div class="h-60 relative"><canvas id="chartHours"></canvas></div>
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5"><i data-lucide="siren" class="w-4 h-4 text-rose-500"></i>Needs attention</h3>
+              <span class="text-[10px] text-slate-400">Urgent or overdue, still open</span>
+            </div>
+            <div id="attentionList" class="divide-y divide-slate-100 max-h-[264px] overflow-y-auto custom-scrollbar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WORK LOG -->
+      <section id="view-log" class="hidden space-y-3">
+        <div id="catBar" class="flex flex-wrap gap-2"></div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-wrap items-center gap-2">
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400"></i>
+            <input id="logSearch" type="text" placeholder="Search description, area, owner, comments…" class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 w-56 sm:w-72" />
+          </div>
+          <div class="relative" data-ms="tags"></div>
+          <div class="relative" data-ms="status"></div>
+          <div class="relative" data-ms="type"></div>
+          <div class="relative" data-ms="consultant"></div>
+          <div class="flex flex-wrap gap-1.5">
+            <button data-flag="urgent" class="flag-btn px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 font-medium flex items-center gap-1"><i data-lucide="flame" class="w-3.5 h-3.5"></i>Urgent</button>
+            <button data-flag="ready" class="flag-btn px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 font-medium flex items-center gap-1"><i data-lucide="rocket" class="w-3.5 h-3.5"></i>Ready to deploy</button>
+            <button data-flag="open" class="flag-btn px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 font-medium">Open only</button>
+            <button data-flag="mine" class="flag-btn px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 font-medium">My items</button>
+          </div>
+          <button id="btnResetFilters" class="ml-auto px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-lg">Reset</button>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-xs text-slate-700">
+              <thead class="bg-slate-50 text-slate-600 uppercase text-[10px] tracking-wider font-bold border-b border-slate-200">
+                <tr id="logHead"></tr>
+              </thead>
+              <tbody id="logBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+          <div id="logEmpty" class="hidden p-10 text-center text-slate-400">
+            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            <p class="text-sm font-medium text-slate-700">No logs match these filters</p>
+          </div>
+          <div id="logFooter" class="px-4 py-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500"></div>
+        </div>
+      </section>
+
+      <!-- REPORTS -->
+      <section id="view-reports" class="hidden space-y-3">
+        <div id="repKpis" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+        <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-wrap items-center gap-2">
+          <div id="repSeg" class="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-semibold"></div>
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400"></i>
+            <input id="repSearch" type="text" placeholder="Search reports…" class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 w-56" />
+          </div>
+          <select id="repTech" class="text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"></select>
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 ml-1"><input type="checkbox" id="repOpenOnly" class="rounded text-purple-600" />Open only</label>
+          <button data-needs-edit id="btnNewReport" class="ml-auto px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-sm flex items-center gap-1"><i data-lucide="plus" class="w-3.5 h-3.5"></i>Add report item</button>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-xs text-slate-700">
+              <thead class="bg-slate-50 text-slate-600 uppercase text-[10px] tracking-wider font-bold border-b border-slate-200">
+                <tr>
+                  <th class="px-3 py-3">Sl No</th>
+                  <th class="px-3 py-3 min-w-[260px]">Report / Description</th>
+                  <th class="px-3 py-3">Nature</th>
+                  <th class="px-3 py-3">Technology</th>
+                  <th class="px-3 py-3">Area</th>
+                  <th class="px-3 py-3">Status</th>
+                  <th class="px-3 py-3">Consultant</th>
+                  <th class="px-3 py-3">Owner</th>
+                  <th class="px-3 py-3 whitespace-nowrap">ETA</th>
+                  <th class="px-3 py-3 text-center">Ready</th>
+                  <th class="px-3 py-3 text-center">Urgent</th>
+                  <th class="px-3 py-3 text-right">Hours</th>
+                </tr>
+              </thead>
+              <tbody id="repBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+          <div id="repEmpty" class="hidden p-10 text-center text-slate-400">
+            <i data-lucide="file-x" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            <p class="text-sm font-medium text-slate-700">No report items here yet</p>
+            <p class="text-xs mt-1">Any log tagged <b>Report</b> appears in this list.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TEAM (admin) -->
+      <section id="view-team" class="hidden space-y-3">
+        <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100">
+            <h3 class="text-sm font-bold text-slate-900">Team access</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">Approve new sign-ups and set roles. <b>Admin</b>: everything incl. approvals &amp; deletes · <b>Consultant</b>: create and update logs · <b>Viewer</b>: read only.</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-50 text-slate-600 uppercase text-[10px] tracking-wider font-bold">
+                <tr><th class="px-4 py-2.5">Name</th><th class="px-4 py-2.5">Email</th><th class="px-4 py-2.5">Role</th><th class="px-4 py-2.5">Access</th><th class="px-4 py-2.5 text-right">Open items</th><th class="px-4 py-2.5 text-right">Password</th></tr>
+              </thead>
+              <tbody id="teamBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ ISSUE MODAL ============ -->
+  <div id="modalIssue" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl my-4">
+      <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between rounded-t-2xl">
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="clipboard-list" class="w-4 h-4 text-indigo-600"></i>
+          <span id="modalTitle">New log</span>
+          <span id="modalSl" class="font-mono text-[11px] text-slate-400"></span>
+        </h3>
+        <button type="button" data-close-modal class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <form id="formIssue" class="p-5 space-y-4" novalidate>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Category <span class="text-rose-500">*</span> <span class="font-normal text-slate-400">— pick one or more</span></label>
+          <div id="fCategory" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1.5">More tags</label>
+          <div id="fTags" class="flex flex-wrap gap-1.5"></div>
+          <div class="mt-2 flex gap-2">
+            <input id="fNewTag" type="text" maxlength="30" placeholder="Add a custom tag…" class="flex-1 text-xs px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            <button type="button" id="btnAddTag" class="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 rounded-lg">Add tag</button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1" for="fDescription">Description <span class="text-rose-500">*</span></label>
+          <textarea id="fDescription" rows="3" placeholder="What needs to be done / what is the issue…" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fArea">Area</label>
+            <input id="fArea" list="areaList" placeholder="e.g. Finance - AP" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg" />
+            <datalist id="areaList"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fType">Type</label>
+            <select id="fType" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg"></select>
+          </div>
+          <div id="fReportTechWrap" class="hidden">
+            <label class="block text-xs font-semibold text-purple-700 mb-1" for="fReportTech">Report technology</label>
+            <select id="fReportTech" class="w-full text-xs px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fStatus">Status</label>
+            <select id="fStatus" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fOwner">Owner of the ticket</label>
+            <input id="fOwner" list="ownerList" placeholder="Requestor / stakeholder" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg" />
+            <datalist id="ownerList"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fConsultant">Consultant in charge</label>
+            <select id="fConsultant" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fEta">ETA</label>
+            <input id="fEta" type="date" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fActual">Actual completion date</label>
+            <input id="fActual" type="date" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1" for="fHours">Hours taken</label>
+            <input id="fHours" type="number" min="0" step="0.25" placeholder="0" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg" />
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-rose-200 bg-rose-50/60 text-xs font-semibold text-rose-800 cursor-pointer">
+            <input id="fUrgent" type="checkbox" class="rounded text-rose-600 focus:ring-rose-500" /> <i data-lucide="flame" class="w-3.5 h-3.5"></i> Is urgent
+          </label>
+          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-teal-200 bg-teal-50/60 text-xs font-semibold text-teal-800 cursor-pointer">
+            <input id="fReady" type="checkbox" class="rounded text-teal-600 focus:ring-teal-500" /> <i data-lucide="rocket" class="w-3.5 h-3.5"></i> Ready for deployment
+          </label>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1" for="fComments">Comments</label>
+          <textarea id="fComments" rows="2" placeholder="Dependencies, blockers, notes…" class="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg"></textarea>
+        </div>
+
+        <div id="activityWrap" class="hidden">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Activity</div>
+          <div id="activityList" class="max-h-36 overflow-y-auto custom-scrollbar rounded-lg border border-slate-100 bg-slate-50 divide-y divide-slate-100 text-[11px]"></div>
+        </div>
+
+        <p id="formError" class="hidden text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></p>
+
+        <div class="pt-3 border-t border-slate-100 flex items-center gap-2">
+          <button type="button" id="btnDeleteIssue" class="hidden px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg flex items-center gap-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>Delete</button>
+          <div class="ml-auto flex gap-2">
+            <button type="button" data-close-modal class="px-3.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" id="btnSaveIssue" class="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm">Save log</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none"></div>
+
+<script>
+/* =====================================================================
+   STORAGE — same model as Ledgr: the database is an Excel file in a
+   PRIVATE GitHub repo, read and written through the GitHub API.
+   The connection (repo + token, encrypted with the team access key) is
+   read from worklog-config.json published next to this page.
+   ===================================================================== */
+const CONFIG = {
+  CONFIG_FILE: 'worklog-config.json',
+  POLL_SECONDS: 30,        // how often to pick up other users' changes
+  SESSION_HOURS: 12,       // sign-in lasts this long in a browser tab
+  DEFAULT_CONSULTANTS: ['Sanjo', 'Boniya', 'Pranav', 'Emil', 'Asif', 'Jayaram', 'Imran'],   // replaced by the Lists sheet
+};
+
+/* ---------- Reference lists ---------- */
+const CATEGORY_TAGS = ['Development', 'Support', 'Report'];
+const EXTRA_TAGS = ['Bug', 'Enhancement', 'Change Request', 'Hotfix', 'Configuration', 'Integration', 'Data Migration', 'Performance', 'Security', 'UAT', 'Training', 'Documentation'];
+const TYPES = ['Fresh Development', 'Issue', 'Enhancement', 'Change Request', 'Query / How-to', 'Configuration'];
+const STATUSES = ['Not Started', 'WIP', 'Pending Clarification', 'On Hold', 'UAT / Testing', 'Completed', 'Deployed', 'Closed'];
+const DONE_STATUSES = ['Completed', 'Deployed', 'Closed'];
+const REPORT_TECH = ['ER', 'SSRS', 'Power BI', 'Excel Add-in', 'Other'];
+const AREAS = ['Finance - GL', 'Finance - AP', 'Finance - AR', 'Fixed Assets', 'Cash & Bank', 'Tax', 'Procurement', 'Sales', 'Inventory', 'Warehouse', 'Projects', 'HR / Payroll', 'Integration', 'Security', 'Budgeting', 'General'];
+
+const CAT_STYLE = {
+  Development: { chip: 'bg-indigo-50 text-indigo-700 border-indigo-200', bar: '#6366f1', icon: 'code-2' },
+  Support:     { chip: 'bg-teal-50 text-teal-700 border-teal-200',       bar: '#14b8a6', icon: 'life-buoy' },
+  Report:      { chip: 'bg-purple-50 text-purple-700 border-purple-200', bar: '#9333ea', icon: 'file-bar-chart' },
+};
+const STATUS_STYLE = {
+  'Not Started':           'bg-slate-100 text-slate-600 border-slate-200',
+  'WIP':                   'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'Pending Clarification': 'bg-amber-50 text-amber-700 border-amber-200',
+  'On Hold':               'bg-orange-50 text-orange-700 border-orange-200',
+  'UAT / Testing':         'bg-sky-50 text-sky-700 border-sky-200',
+  'Completed':             'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Deployed':              'bg-teal-50 text-teal-700 border-teal-200',
+  'Closed':                'bg-slate-200 text-slate-700 border-slate-300',
+};
+const STATUS_COLOR = { 'Not Started':'#94a3b8', 'WIP':'#6366f1', 'Pending Clarification':'#f59e0b', 'On Hold':'#f97316', 'UAT / Testing':'#0ea5e9', 'Completed':'#10b981', 'Deployed':'#14b8a6', 'Closed':'#475569' };
+
+let DEMO = false;
+const WRITABLE_FIELDS = ['description', 'area', 'type', 'tags', 'status', 'ready_for_deployment', 'owner', 'consultant', 'eta', 'actual_completion_date', 'comments', 'is_urgent', 'hours_taken', 'report_tech'];
+
+/* ---------- Small helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const isDone = (s) => DONE_STATUSES.includes(s);
+const isOverdue = (i) => !isDone(i.status) && i.eta && i.eta < todayStr();
+const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+const fmtDate = (d) => { if (!d) return ''; const x = new Date(d + (d.length === 10 ? 'T00:00:00' : '')); return isNaN(x) ? d : x.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); };
+const fmtDateTime = (d) => { const x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+const fmtHours = (h) => { const n = Number(h) || 0; return n % 1 === 0 ? String(n) : n.toFixed(2).replace(/0$/, ''); };
+const icons = () => { try { window.lucide && lucide.createIcons(); } catch (e) {} };
+const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+const initials = (name) => (name || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('');
+
+function toast(title, msg = '', isError = false) {
+  const t = document.createElement('div');
+  t.className = `p-3 rounded-xl shadow-lg border text-xs max-w-sm flex items-start gap-2.5 transition-opacity duration-300 pointer-events-auto ${isError ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-slate-900 border-slate-800 text-white'}`;
+  t.innerHTML = `<i data-lucide="${isError ? 'alert-triangle' : 'check-circle-2'}" class="w-4 h-4 shrink-0 mt-0.5 ${isError ? 'text-rose-600' : 'text-emerald-400'}"></i>
+    <div><div class="font-bold">${esc(title)}</div>${msg ? `<div class="text-[11px] opacity-90 mt-0.5">${esc(msg)}</div>` : ''}</div>`;
+  $('toastContainer').appendChild(t); icons();
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, isError ? 5000 : 3200);
+}
+
+function cleanRow(obj) {
+  const out = {};
+  WRITABLE_FIELDS.forEach(k => { if (k in obj) out[k] = obj[k]; });
+  ['eta', 'actual_completion_date', 'area', 'owner', 'consultant', 'comments', 'report_tech', 'type'].forEach(k => { if (k in out && (out[k] === '' || out[k] === undefined)) out[k] = null; });
+  if ('hours_taken' in out) out.hours_taken = Math.max(0, Number(out.hours_taken) || 0);
+  if ('tags' in out) out.tags = uniq(out.tags || []);
+  return out;
+}
+
+/* =====================================================================
+   DATA LAYER — GitHub + Excel (shared, multi-user) or LocalStorage (demo)
+   ===================================================================== */
+const GitHubStore = (() => {
+  const DEVICE_KEY = 'osus_wl_device_v1', SESSION_KEY = 'osus_wl_session_v1', LOCAL_CFG_KEY = 'osus_wl_config_v1';
+  const gh = { token: '', repo: '', path: '', branch: 'main', sha: null };
+  let cfg = null, db = null, user = null, authCb = null, changeCb = null, statusCb = null, polling = false, pollStarted = false;
+
+  /* ---------- crypto (same approach as Ledgr: PBKDF2 → AES-GCM) ---------- */
+  const enc = (s) => new TextEncoder().encode(s);
+  const abToB64 = (buf) => { const b = new Uint8Array(buf); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+  const b64ToAb = (b64) => { const s = atob(String(b64).replace(/\s/g, '')); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b.buffer; };
+  const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+  async function aesKey(pass, salt) {
+    const base = await crypto.subtle.importKey('raw', enc(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function seal(pass, text) {
+    const salt = rand(16), iv = rand(12);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(pass, salt), enc(text));
+    return { salt: abToB64(salt), iv: abToB64(iv), ct: abToB64(ct) };
+  }
+  async function unseal(pass, box) {
+    const key = await aesKey(pass, new Uint8Array(b64ToAb(box.salt)));
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(b64ToAb(box.iv)) }, key, b64ToAb(box.ct)));
+  }
+  async function hashPassword(pw, saltB64) {
+    const salt = saltB64 ? new Uint8Array(b64ToAb(saltB64)) : rand(16);
+    const base = await crypto.subtle.importKey('raw', enc(pw), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, base, 256);
+    return `pbkdf2$150000$${abToB64(salt)}$${abToB64(bits)}`;
+  }
+  async function verifyPassword(pw, stored) {
+    const p = String(stored || '').split('$');
+    return p.length === 4 && p[0] === 'pbkdf2' && (await hashPassword(pw, p[2])) === stored;
+  }
+
+  /* ---------- Excel <-> data ---------- */
+  const ISSUE_COLS = [
+    ['sl_no', 'Sl No', 'int'], ['description', 'Description', 'text'], ['tags', 'Tags', 'tags'], ['area', 'Area', 'text'], ['type', 'Type', 'text'],
+    ['report_tech', 'Report Technology', 'text'], ['status', 'Status', 'text'], ['ready_for_deployment', 'Ready for Deployment', 'bool'],
+    ['owner', 'Owner of the Ticket', 'text'], ['consultant', 'Consultant in Charge', 'text'], ['eta', 'ETA', 'date'],
+    ['actual_completion_date', 'Actual Completion Date', 'date'], ['comments', 'Comments', 'text'], ['is_urgent', 'Is Urgent', 'bool'],
+    ['hours_taken', 'Hours Taken', 'num'], ['created_by', 'Created By', 'text'], ['created_at', 'Created At', 'text'],
+    ['updated_by', 'Updated By', 'text'], ['updated_at', 'Updated At', 'text'],
+  ];
+  const ISSUE_WIDTHS = [7, 60, 26, 18, 18, 16, 20, 12, 22, 20, 13, 13, 40, 9, 10, 26, 22, 26, 22];
+  const USER_COLS = [['id', 'Username'], ['full_name', 'Full Name'], ['role', 'Role'], ['approved', 'Approved'], ['password_hash', 'Password Hash'], ['created_at', 'Created At']];
+  const ACT_COLS = [['sl_no', 'Sl No'], ['changed_at', 'Changed At'], ['changed_by_name', 'Changed By'], ['field', 'Field'], ['old_value', 'Old Value'], ['new_value', 'New Value']];
+  const LIST_COLS = [['categories', 'Categories'], ['extra_tags', 'Extra Tags'], ['types', 'Types'], ['statuses', 'Statuses'], ['areas', 'Areas'], ['report_tech', 'Report Technology'], ['consultants', 'Consultants']];
+  const MAX_ACTIVITY = 5000;
+  const yes = (v) => /^(y|yes|true|1|x)$/i.test(String(v ?? '').trim());
+  const txt = (v) => (v === '' || v == null) ? null : String(v).trim();
+  const toSerial = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? (Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(1899, 11, 30)) / 86400000 : null; };
+
+  function rowsOf(wb, name) {
+    const sn = wb.SheetNames.find(s => s.trim().toLowerCase() === name.toLowerCase());
+    if (!sn) return [];
+    return XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '', raw: true }).map(r => { const o = {}; Object.keys(r).forEach(k => o[k.trim().toLowerCase()] = r[k]); return o; });
+  }
+  const get = (r, header) => r[header.toLowerCase()];
+  const defaultLists = () => ({ categories: [...CATEGORY_TAGS], extra_tags: [...EXTRA_TAGS], types: [...TYPES], statuses: [...STATUSES], areas: [...AREAS], report_tech: [...REPORT_TECH], consultants: [...CONFIG.DEFAULT_CONSULTANTS] });
+  const blankDb = () => ({ issues: [], users: [], activity: [], lists: defaultLists() });
+
+  function parseDb(buf) {
+    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    let maxSl = 0;
+    const issues = rowsOf(wb, 'Issues').map(r => {
+      const o = {};
+      ISSUE_COLS.forEach(([k, h, kind]) => {
+        const v = get(r, h);
+        o[k] = kind === 'int' || kind === 'num' ? (Number(v) || 0)
+          : kind === 'bool' ? yes(v)
+          : kind === 'date' ? parseExcelDate(v)
+          : kind === 'tags' ? uniq(String(v || '').split(/[,;|]/).map(t => t.trim()).map(t => CATEGORY_TAGS.find(c => c.toLowerCase() === t.toLowerCase()) || t))
+          : txt(v);
+      });
+      if (!STATUSES.includes(o.status)) o.status = normStatus(o.status).status;
+      maxSl = Math.max(maxSl, o.sl_no);
+      return o;
+    }).filter(i => i.description);
+    const seen = new Set();
+    issues.forEach(i => { if (!i.sl_no || seen.has(i.sl_no)) i.sl_no = ++maxSl; seen.add(i.sl_no); });
+
+    const users = rowsOf(wb, 'Users').map(r => {
+      const role = String(get(r, 'Role') || '').trim().toLowerCase();
+      return { id: String(get(r, 'Username') || '').trim().toLowerCase(), full_name: String(get(r, 'Full Name') || '').trim(), role: ['admin', 'consultant', 'viewer'].includes(role) ? role : 'consultant', approved: yes(get(r, 'Approved')), password_hash: String(get(r, 'Password Hash') || '').trim(), created_at: txt(get(r, 'Created At')) };
+    }).filter(u => u.id);
+
+    const activity = rowsOf(wb, 'Activity').map(r => ({ sl_no: Number(get(r, 'Sl No')) || 0, changed_at: txt(get(r, 'Changed At')), changed_by_name: txt(get(r, 'Changed By')), field: txt(get(r, 'Field')), old_value: txt(get(r, 'Old Value')), new_value: txt(get(r, 'New Value')) })).filter(a => a.sl_no && a.field);
+
+    const lr = rowsOf(wb, 'Lists'), lists = {};
+    LIST_COLS.forEach(([k, h]) => { lists[k] = uniq(lr.map(r => String(get(r, h) ?? '').trim())); });
+    return { issues, users, activity, lists };
+  }
+
+  function makeSheet(cols, rows, widths) {
+    const ws = XLSX.utils.aoa_to_sheet([cols.map(c => c[1]), ...rows]);
+    ws['!cols'] = widths.map(w => ({ wch: w }));
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(rows.length, 1), c: cols.length - 1 } }) };
+    return ws;
+  }
+  function buildDb(d) {
+    const wb = XLSX.utils.book_new();
+    const issues = [...d.issues].sort((a, b) => a.sl_no - b.sl_no);
+    const ws = makeSheet(ISSUE_COLS, issues.map(i => ISSUE_COLS.map(([k, , kind]) => {
+      const v = i[k];
+      if (kind === 'bool') return v ? 'Yes' : 'No';
+      if (kind === 'tags') return (v || []).join(', ');
+      if (kind === 'int' || kind === 'num') return Number(v) || 0;
+      if (kind === 'date') return '';
+      return v ?? '';
+    })), ISSUE_WIDTHS);
+    ISSUE_COLS.forEach(([k, , kind], c) => {
+      if (kind !== 'date') return;
+      issues.forEach((i, r) => { const s = toSerial(i[k]); if (s != null) ws[XLSX.utils.encode_cell({ r: r + 1, c })] = { t: 'n', v: s, z: 'dd-mmm-yyyy' }; });
+    });
+    XLSX.utils.book_append_sheet(wb, ws, 'Issues');
+
+    XLSX.utils.book_append_sheet(wb, makeSheet(USER_COLS, d.users.map(u => [u.id, u.full_name, u.role, u.approved ? 'Yes' : 'No', u.password_hash, u.created_at || '']), [30, 22, 12, 10, 70, 24]), 'Users');
+
+    const acts = [...d.activity].sort((a, b) => String(a.changed_at).localeCompare(String(b.changed_at))).slice(-MAX_ACTIVITY);
+    XLSX.utils.book_append_sheet(wb, makeSheet(ACT_COLS, acts.map(a => ACT_COLS.map(([k]) => a[k] ?? '')), [7, 24, 20, 22, 30, 30]), 'Activity');
+
+    const L = { ...defaultLists(), ...Object.fromEntries(Object.entries(d.lists || {}).filter(([, v]) => v && v.length)) };
+    const n = Math.max(...LIST_COLS.map(([k]) => L[k].length));
+    XLSX.utils.book_append_sheet(wb, makeSheet(LIST_COLS, Array.from({ length: n }, (_, r) => LIST_COLS.map(([k]) => L[k][r] ?? '')), [14, 18, 20, 22, 18, 18, 18]), 'Lists');
+
+    const readme = XLSX.utils.aoa_to_sheet(README_ROWS);
+    readme['!cols'] = [{ wch: 22 }, { wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, readme, 'README');
+    return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  }
+  const README_ROWS = [
+    ['OSUS Work Log — database file'], [],
+    ['What this is', 'This workbook IS the database of the OSUS Work Log web app. The app reads and rewrites it through the GitHub API.'],
+    ['Issues', 'One row per log. Sl No is the permanent ID — never change or reuse it. Tags are comma separated (e.g. "Report, Bug"). Yes/No columns take Yes or No.'],
+    ['Users', 'Logins. Passwords are stored only as salted PBKDF2 hashes. Role = admin / consultant / viewer. Approved = Yes / No.'],
+    ['Activity', 'Change history written by the app (latest 5,000 changes are kept).'],
+    ['Lists', 'Dropdown values. Extra Tags, Areas, Report Technology and Consultants can be edited freely. Categories, Types and Statuses are reference only (built into the app).'],
+    [],
+    ['Editing in Excel', 'Fine for bulk fixes, but download → edit → upload while nobody is saving in the app, otherwise one of the two saves can overwrite the other.'],
+    ['Formatting', 'The app rewrites this file on every save, so colours, filters and dropdowns added in Excel are not kept.'],
+  ];
+  function applyLists(lists) {
+    const put = (arr, vals) => { if (vals && vals.length) { arr.length = 0; arr.push(...vals); } };
+    put(EXTRA_TAGS, (lists.extra_tags || []).filter(t => !CATEGORY_TAGS.includes(t)));
+    put(AREAS, lists.areas); put(REPORT_TECH, lists.report_tech); put(CONFIG.DEFAULT_CONSULTANTS, lists.consultants);
+  }
+
+  /* ---------- GitHub Contents API ---------- */
+  const apiUrl = () => `https://api.github.com/repos/${gh.repo}/contents/${gh.path.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')}`;
+  const hdr = (accept = 'application/vnd.github+json') => ({ Authorization: 'Bearer ' + gh.token, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28' });
+  const ref = () => '?ref=' + encodeURIComponent(gh.branch);
+  function ghError(res, doing) {
+    if (res.status === 401) return new Error('GitHub rejected the access token (expired or revoked). The admin needs to create a new token and run setup again.');
+    if (res.status === 403) return new Error(res.headers.get('x-ratelimit-remaining') === '0' ? 'GitHub hourly API limit reached — wait a few minutes and try again.' : `GitHub refused ${doing}. The token needs "Contents: Read and write" on ${gh.repo}.`);
+    return new Error(`GitHub error ${res.status} while ${doing}.`);
+  }
+  async function ghMeta() {
+    const res = await fetch(apiUrl() + ref(), { headers: hdr(), cache: 'no-store' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw ghError(res, 'reading the database');
+    return res.json();
+  }
+  async function ghDownload(meta) {
+    if (meta.content && meta.encoding === 'base64') return b64ToAb(meta.content);
+    const res = await fetch(apiUrl() + ref(), { headers: hdr('application/vnd.github.raw'), cache: 'no-store' });
+    if (!res.ok) throw ghError(res, 'downloading the database');
+    return res.arrayBuffer();
+  }
+  async function ghPut(buf, message) {
+    const body = { message, content: abToB64(buf), branch: gh.branch };
+    if (gh.sha) body.sha = gh.sha;
+    return fetch(apiUrl(), { method: 'PUT', headers: { ...hdr(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  async function load() {
+    const meta = await ghMeta();
+    if (!meta) throw new Error(`The database file "${gh.path}" was not found in ${gh.repo}.`);
+    db = parseDb(await ghDownload(meta)); gh.sha = meta.sha; applyLists(db.lists);
+  }
+
+  /* Every change = re-applicable function. If someone else saved first (409/422),
+     download their version, re-apply ours on top, and save again — nobody's edits are lost. */
+  let queue = Promise.resolve();
+  function mutate(label, fn) {
+    const run = queue.then(async () => {
+      if (!db) await load();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const work = structuredClone(db);
+        const result = await fn(work);
+        const res = await ghPut(buildDb(work), `Work log: ${label} (${user || 'setup'})`);
+        if (res.ok) { gh.sha = (await res.json()).content.sha; db = work; if (attempt && changeCb) changeCb(); return result; }
+        if (res.status === 409 || res.status === 422) { await load(); continue; }
+        throw ghError(res, 'saving');
+      }
+      throw new Error('Could not save — the file kept changing. Please try again.');
+    });
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function refresh() {
+    if (!gh.token || !user || polling) return;
+    polling = true;
+    try {
+      const meta = await ghMeta();
+      if (meta && meta.sha !== gh.sha) {
+        await queue;
+        if (meta.sha !== gh.sha) { db = parseDb(await ghDownload(meta)); gh.sha = meta.sha; applyLists(db.lists); changeCb && changeCb(); }
+      }
+      statusCb && statusCb('SYNCED');
+    } catch (e) { console.warn(e); statusCb && statusCb('ERROR'); }
+    finally { polling = false; }
+  }
+
+  /* ---------- connection, device memory, session ---------- */
+  const getDevice = () => { try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)); return d && d.ct && cfg && d.repo === cfg.repo && d.path === cfg.path ? d : null; } catch { return null; } };
+  function setConn(token) { gh.token = token; gh.repo = cfg.repo; gh.path = cfg.path; gh.branch = cfg.branch || 'main'; gh.sha = null; }
+  async function unlockWithTeamKey(key) {
+    try { setConn(await unseal(key, cfg)); } catch { throw new Error('That team access key is not correct.'); }
+  }
+  async function rememberDevice(password) {
+    try { localStorage.setItem(DEVICE_KEY, JSON.stringify({ repo: gh.repo, path: gh.path, ...(await seal(password, gh.token)) })); } catch (e) { console.warn(e); }
+  }
+  async function ensureToken(password, opts) {
+    if (gh.token) return;
+    if (opts && opts.teamKey) return unlockWithTeamKey(opts.teamKey);
+    const dev = getDevice();
+    if (dev) { try { setConn(await unseal(password, dev)); return; } catch {} }
+    const e = new Error(dev ? 'Could not unlock with that password. If it is correct, this device was set up by someone else — enter the team access key once.' : 'First time on this device — enter the team access key (ask your admin).');
+    e.code = 'NEEDS_TEAM_KEY'; throw e;
+  }
+  function saveSession() {
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ t: gh.token, u: user, r: gh.repo, p: gh.path, b: gh.branch, e: Date.now() + CONFIG.SESSION_HOURS * 3600e3 })); } catch {}
+  }
+  const me = () => db && db.users.find(u => u.id === user);
+  const pub = (u) => { const { password_hash, ...p } = u; return { ...p, email: u.id }; };
+  const whoName = () => (me() && me().full_name) || user;
+  const TRACK = ['status', 'consultant', 'ready_for_deployment', 'is_urgent', 'eta', 'actual_completion_date', 'hours_taken', 'owner', 'type', 'area'];
+  const addAct = (d, sl, field, o, n) => d.activity.push({ sl_no: sl, changed_at: new Date().toISOString(), changed_by_name: whoName(), field, old_value: o == null ? null : String(o), new_value: n == null ? null : String(n) });
+  const requireEdit = () => { const m = me(); if (!m || !m.approved || m.role === 'viewer') throw new Error('Your account is not allowed to edit logs.'); };
+  const requireAdmin = () => { const m = me(); if (!m || !m.approved || m.role !== 'admin') throw new Error('Only admins can manage users.'); };
+  const BLANK = { tags: [], status: 'Not Started', ready_for_deployment: false, is_urgent: false, hours_taken: 0 };
+
+  return {
+    ready: () => true,
+    async init() {
+      try { const res = await fetch(CONFIG.CONFIG_FILE + '?v=' + Date.now(), { cache: 'no-store' }); if (res.ok) { const j = await res.json(); if (j && j.repo && j.ct) cfg = j; } } catch {}
+      if (!cfg) { try { const j = JSON.parse(localStorage.getItem(LOCAL_CFG_KEY)); if (j && j.repo && j.ct) cfg = j; } catch {} }
+    },
+    hasConfig: () => !!cfg,
+    needsTeamKey: () => !!cfg && !gh.token && !getDevice(),
+    configObject: () => cfg,
+    async setup({ repo, path, branch, token, teamKey }) {
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('Repository must look like owner/repo-name.');
+      if (!token) throw new Error('Paste the GitHub access token.');
+      Object.assign(gh, { token, repo, path, branch, sha: null });
+      const rr = await fetch(`https://api.github.com/repos/${repo}`, { headers: hdr(), cache: 'no-store' });
+      if (rr.status === 404) throw new Error('Repository not found, or the token has no access to it.');
+      if (!rr.ok) throw ghError(rr, 'reading the repository');
+      if ((await rr.json()).private === false) throw new Error('This repository is PUBLIC, so anyone could read the work log. Make it private (repo Settings → General → Change visibility) and try again.');
+      let created = false;
+      const meta = await ghMeta();
+      if (!meta) {
+        db = blankDb();
+        const res = await ghPut(buildDb(db), 'Work log: create database');
+        if (!res.ok) throw ghError(res, 'creating the database file');
+        gh.sha = (await res.json()).content.sha; created = true;
+      } else { db = parseDb(await ghDownload(meta)); gh.sha = meta.sha; }
+      applyLists(db.lists);
+      cfg = { app: 'osus-worklog', v: 1, repo, path, branch, ...(await seal(teamKey, token)) };
+      try { localStorage.setItem(LOCAL_CFG_KEY, JSON.stringify(cfg)); } catch {}
+      return { created, repo, path, issues: db.issues.length, users: db.users.length };
+    },
+    async getSession() {
+      if (!cfg) return null;
+      if (!user) { try { const s = JSON.parse(sessionStorage.getItem(SESSION_KEY)); if (s && s.e > Date.now() && s.r === cfg.repo) { Object.assign(gh, { token: s.t, repo: s.r, path: s.p, branch: s.b }); user = s.u; } } catch {} }
+      if (!user || !gh.token) return null;
+      await load();
+      if (!me()) { user = null; return null; }
+      return { user: { id: user, email: user } };
+    },
+    onAuth(cb) { authCb = cb; },
+    async signIn(email, password, opts = {}) {
+      if (!cfg) throw new Error('Not connected to a database yet.');
+      const id = email.trim().toLowerCase();
+      await ensureToken(password, opts);
+      await load();
+      const u = db.users.find(x => x.id === id);
+      if (!u || !(await verifyPassword(password, u.password_hash))) throw new Error('Incorrect email or password.');
+      user = id; saveSession(); await rememberDevice(password); authCb && authCb('SIGNED_IN');
+    },
+    async signUp(email, password, fullName, opts = {}) {
+      if (!cfg) throw new Error('Not connected to a database yet.');
+      const id = email.trim().toLowerCase();
+      await ensureToken(password, opts);
+      await load();
+      if (db.users.some(u => u.id === id)) throw new Error('An account with this email already exists — sign in instead.');
+      const password_hash = await hashPassword(password);
+      await mutate('new user ' + id, (d) => {
+        if (d.users.some(u => u.id === id)) throw new Error('An account with this email already exists — sign in instead.');
+        const first = d.users.length === 0;
+        d.users.push({ id, full_name: fullName.trim(), role: first ? 'admin' : 'consultant', approved: first, password_hash, created_at: new Date().toISOString() });
+      });
+      user = id; saveSession(); await rememberDevice(password); authCb && authCb('SIGNED_IN');
+      return { needsConfirm: false };
+    },
+    async signOut() {
+      user = null; db = null; gh.token = ''; gh.sha = null;
+      try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+      authCb && authCb('SIGNED_OUT');
+    },
+    async changePassword(current, next) {
+      const m = me();
+      if (!m || !(await verifyPassword(current, m.password_hash))) throw new Error('Current password is wrong.');
+      const h = await hashPassword(next);
+      await mutate('password change', d => { d.users.find(u => u.id === user).password_hash = h; });
+      await rememberDevice(next);
+    },
+    async getProfile(id) { const u = db && db.users.find(x => x.id === id); return u ? pub(u) : null; },
+    async listProfiles() { return (db ? db.users : []).map(pub); },
+    async updateProfile(id, patch) {
+      requireAdmin();
+      const h = patch.password ? await hashPassword(patch.password) : null;
+      return mutate('update user ' + id, d => {
+        const u = d.users.find(x => x.id === id); if (!u) throw new Error('User not found.');
+        if ('role' in patch) u.role = patch.role;
+        if ('approved' in patch) u.approved = !!patch.approved;
+        if (h) u.password_hash = h;
+        return pub(u);
+      });
+    },
+    async listIssues() { return structuredClone(db ? db.issues : []); },
+    async insertIssue(row) {
+      requireEdit();
+      return mutate('add log', d => {
+        const sl = d.issues.reduce((m, i) => Math.max(m, i.sl_no), 0) + 1, now = new Date().toISOString();
+        const rec = { ...BLANK, ...cleanRow(row), sl_no: sl, created_by: user, created_at: now, updated_by: user, updated_at: now };
+        d.issues.push(rec); addAct(d, sl, 'created');
+        return structuredClone(rec);
+      });
+    },
+    async updateIssue(sl, patch) {
+      requireEdit();
+      return mutate(`update #${sl}`, d => {
+        const r = d.issues.find(i => i.sl_no === sl);
+        if (!r) throw new Error(`Log #${sl} no longer exists — someone may have deleted it.`);
+        const p = cleanRow(patch);
+        TRACK.forEach(f => { if (f in p && String(p[f] ?? '') !== String(r[f] ?? '')) addAct(d, sl, f, r[f], p[f]); });
+        Object.assign(r, p, { updated_by: user, updated_at: new Date().toISOString() });
+        return structuredClone(r);
+      });
+    },
+    async deleteIssue(sl) {
+      requireEdit();
+      return mutate(`delete #${sl}`, d => {
+        const r = d.issues.find(i => i.sl_no === sl); if (!r) return;
+        if (me().role !== 'admin' && r.created_by !== user) throw new Error('Only admins or the person who created a log can delete it.');
+        d.issues = d.issues.filter(i => i.sl_no !== sl);
+        d.activity = d.activity.filter(a => a.sl_no !== sl);
+      });
+    },
+    async bulkInsert(rows) {
+      requireEdit();
+      return mutate(`import ${rows.length} logs`, d => {
+        let sl = d.issues.reduce((m, i) => Math.max(m, i.sl_no), 0); const now = new Date().toISOString();
+        rows.forEach(row => { sl++; d.issues.push({ ...BLANK, ...cleanRow(row), sl_no: sl, created_by: user, created_at: now, updated_by: user, updated_at: now }); addAct(d, sl, 'created'); });
+      });
+    },
+    async listActivity(sl) { return (db ? db.activity : []).filter(a => a.sl_no === sl).sort((a, b) => String(b.changed_at).localeCompare(String(a.changed_at))).slice(0, 50); },
+    subscribe(onChange, onStatus) {
+      changeCb = onChange; statusCb = onStatus; onStatus('SYNCED');
+      if (pollStarted) return; pollStarted = true;
+      setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, CONFIG.POLL_SECONDS * 1000);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+    },
+    _parseDb: parseDb, _buildDb: buildDb,
+  };
+})();
+
+const LocalStore = (() => {
+  const K = { issues: 'osus_wl_issues', users: 'osus_wl_users', session: 'osus_wl_session', act: 'osus_wl_activity' };
+  const read = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
+  const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  let authCb = null, changeCb = null;
+  window.addEventListener('storage', (e) => { if (Object.values(K).includes(e.key) && changeCb) changeCb(); });
+  async function hash(s) {
+    try { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
+    catch { return 'plain:' + s; }
+  }
+  const me = () => { const s = read(K.session, null); return s ? read(K.users, []).find(u => u.id === s.id) : null; };
+  const who = () => { const u = me(); return u ? (u.full_name || u.email) : 'Someone'; };
+  function logAct(sl, field, oldV, newV) {
+    const act = read(K.act, []);
+    act.push({ sl_no: sl, changed_by_name: who(), field, old_value: oldV == null ? null : String(oldV), new_value: newV == null ? null : String(newV), changed_at: new Date().toISOString() });
+    write(K.act, act.slice(-2000));
+  }
+  function seed() {
+    if (read(K.issues, null)) return;
+    const t = todayStr(), add = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    const base = { ready_for_deployment: false, is_urgent: false, hours_taken: 0, comments: '', actual_completion_date: null, report_tech: null };
+    const rows = [
+      { description: 'Vendor aging report showing wrong buckets for foreign-currency invoices', tags: ['Report', 'Bug'], area: 'Finance - AP', type: 'Issue', report_tech: 'SSRS', status: 'WIP', owner: 'Finance Controller', consultant: 'Boniya', eta: add(-2), is_urgent: true, hours_taken: 6, comments: 'Exchange-rate date mismatch suspected' },
+      { description: 'New VAT return electronic report for quarterly filing', tags: ['Report', 'Development'], area: 'Tax', type: 'Fresh Development', report_tech: 'ER', status: 'UAT / Testing', owner: 'Tax Manager', consultant: 'Sanjo', eta: add(4), hours_taken: 22, ready_for_deployment: true },
+      { description: 'Customer statement Power BI dashboard for collections team', tags: ['Report'], area: 'Finance - AR', type: 'Fresh Development', report_tech: 'Power BI', status: 'Not Started', owner: 'Credit Control', consultant: 'Pranav', eta: add(12) },
+      { description: 'Posting profile error when confirming purchase orders for project items', tags: ['Support', 'Configuration'], area: 'Procurement', type: 'Issue', status: 'Completed', owner: 'Purchase Lead', consultant: 'Emil', eta: add(-5), actual_completion_date: add(-4), hours_taken: 3 },
+      { description: 'Automate bank statement import from host-to-host integration', tags: ['Development', 'Integration'], area: 'Cash & Bank', type: 'Fresh Development', status: 'WIP', owner: 'Treasury', consultant: 'Asif', eta: add(9), hours_taken: 14 },
+      { description: 'User unable to approve journals — workflow stuck at step 2', tags: ['Support', 'Hotfix'], area: 'Finance - GL', type: 'Issue', status: 'Pending Clarification', owner: 'GL Accountant', consultant: 'Jayaram', eta: add(-1), is_urgent: true, hours_taken: 1.5, comments: 'Waiting on screenshot from user' },
+      { description: 'Add cost-centre dimension to fixed asset register report', tags: ['Report', 'Enhancement'], area: 'Fixed Assets', type: 'Enhancement', report_tech: 'SSRS', status: 'Deployed', owner: 'Asset Accountant', consultant: 'Imran', eta: add(-8), actual_completion_date: add(-9), hours_taken: 5, ready_for_deployment: true },
+      { description: 'Sales order release batch job performance degradation', tags: ['Development', 'Performance'], area: 'Sales', type: 'Issue', status: 'On Hold', owner: 'Sales Ops', consultant: 'Sanjo', eta: add(15), hours_taken: 4 },
+    ];
+    write(K.issues, rows.map((r, i) => ({ ...base, ...r, sl_no: i + 1, created_by: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })));
+  }
+  seed();
+  return {
+    ready: () => true,
+    async getSession() { const s = read(K.session, null); return s ? { user: { id: s.id, email: s.email } } : null; },
+    onAuth(cb) { authCb = cb; },
+    async signIn(email, password) {
+      const u = read(K.users, []).find(x => x.email === email.trim().toLowerCase());
+      if (!u) throw new Error('No demo account with that email — use "Create account" first.');
+      if (u.pw !== await hash(password)) throw new Error('Incorrect password.');
+      write(K.session, { id: u.id, email: u.email }); authCb && authCb('SIGNED_IN');
+    },
+    async signUp(email, password, fullName) {
+      const users = read(K.users, []); email = email.trim().toLowerCase();
+      if (users.some(u => u.email === email)) throw new Error('An account with this email already exists.');
+      const u = { id: 'demo-' + Date.now(), email, full_name: fullName.trim(), role: users.length === 0 ? 'admin' : 'consultant', approved: true, pw: await hash(password), created_at: new Date().toISOString() };
+      users.push(u); write(K.users, users); write(K.session, { id: u.id, email }); authCb && authCb('SIGNED_IN');
+      return { needsConfirm: false };
+    },
+    async signOut() { localStorage.removeItem(K.session); authCb && authCb('SIGNED_OUT'); },
+    async changePassword(cur, nw) { const users = read(K.users, []); const s = read(K.session, null); const u = users.find(x => x.id === s?.id); if (!u || u.pw !== await hash(cur)) throw new Error('Current password is wrong.'); u.pw = await hash(nw); write(K.users, users); },
+    async getProfile(id) { const u = read(K.users, []).find(x => x.id === id); if (!u) return null; const { pw, ...p } = u; return p; },
+    async listProfiles() { return read(K.users, []).map(({ pw, ...p }) => p); },
+    async updateProfile(id, patch) { const users = read(K.users, []); const u = users.find(x => x.id === id); const { password, ...rest } = patch; if (password) u.pw = await hash(password); Object.assign(u, rest); write(K.users, users); const { pw, ...p } = u; return p; },
+    async listIssues() { return read(K.issues, []).sort((a, b) => b.sl_no - a.sl_no); },
+    async insertIssue(row) {
+      const all = read(K.issues, []); const sl = all.reduce((m, r) => Math.max(m, r.sl_no), 0) + 1; const now = new Date().toISOString();
+      const rec = { ...cleanRow(row), sl_no: sl, created_by: me()?.id, created_at: now, updated_at: now };
+      all.push(rec); write(K.issues, all); logAct(sl, 'created', null, null); return rec;
+    },
+    async updateIssue(sl, patch) {
+      const all = read(K.issues, []); const r = all.find(x => x.sl_no === sl); if (!r) throw new Error('Log not found');
+      const p = cleanRow(patch);
+      ['status', 'consultant', 'ready_for_deployment', 'is_urgent', 'eta', 'actual_completion_date', 'hours_taken', 'owner', 'type', 'area'].forEach(f => { if (f in p && String(p[f] ?? '') !== String(r[f] ?? '')) logAct(sl, f, r[f], p[f]); });
+      Object.assign(r, p, { updated_at: new Date().toISOString() }); write(K.issues, all); return r;
+    },
+    async deleteIssue(sl) { write(K.issues, read(K.issues, []).filter(x => x.sl_no !== sl)); },
+    async bulkInsert(rows) { for (const r of rows) await this.insertIssue(r); },
+    async listActivity(sl) { return read(K.act, []).filter(a => a.sl_no === sl).reverse().slice(0, 50); },
+    subscribe(onChange, onStatus) { changeCb = onChange; onStatus('LOCAL'); },
+  };
+})();
+
+let Store = GitHubStore;
+
+/* =====================================================================
+   APP STATE
+   ===================================================================== */
+const state = {
+  user: null, me: null, issues: [], profiles: [], tab: 'dashboard', cat: 'All',
+  f: { search: '', tags: new Set(), status: new Set(), type: new Set(), consultant: new Set(), urgent: false, ready: false, open: false, mine: false },
+  sort: { key: 'sl_no', dir: 'desc' },
+  rep: { nature: 'All', search: '', tech: '', open: false },
+  editing: null, charts: {}, subscribed: false, recovering: false,
+};
+
+const canEdit = () => !!state.me && state.me.approved && state.me.role !== 'viewer';
+const isAdmin = () => !!state.me && state.me.approved && state.me.role === 'admin';
+const myName = () => state.me?.full_name || '';
+const canDelete = (i) => isAdmin() || (canEdit() && i.created_by && i.created_by === state.me?.id);
+
+function consultantNames() {
+  const fromProfiles = state.profiles.filter(p => p.approved && p.role !== 'viewer').map(p => p.full_name);
+  const fromData = state.issues.map(i => i.consultant);
+  const base = CONFIG.DEFAULT_CONSULTANTS;
+  return uniq([...fromProfiles, ...base, ...fromData]).sort((a, b) => a.localeCompare(b));
+}
+function extraTags() { return uniq([...EXTRA_TAGS, ...state.issues.flatMap(i => i.tags || [])]).filter(t => !CATEGORY_TAGS.includes(t)); }
+
+/* =====================================================================
+   AUTH & ROUTING
+   ===================================================================== */
+function showView(v) {
+  ['authView', 'pendingView', 'appView'].forEach(id => $(id).classList.toggle('hidden', id !== v));
+  icons();
+}
+function authMsg(text, kind = 'info') {
+  const el = $('authMsg');
+  if (!text) { el.classList.add('hidden'); return; }
+  el.className = `mt-3 text-xs rounded-lg px-3 py-2 ${kind === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`;
+  el.textContent = text;
+}
+let currentAuth = 'signin';
+const AUTH_PANELS = { choice: 'setupChoice', setup: 'formSetup', done: 'setupDone', signin: 'formSignIn', signup: 'formSignUp' };
+function showAuthForm(which) {
+  currentAuth = which;
+  Object.values(AUTH_PANELS).forEach(id => $(id).classList.add('hidden'));
+  $(AUTH_PANELS[which]).classList.remove('hidden');
+  const isLogin = which === 'signin' || which === 'signup';
+  $('authTabs').classList.toggle('hidden', !isLogin);
+  $('teamKeyBox').classList.toggle('hidden', !(isLogin && Store.needsTeamKey && Store.needsTeamKey()));
+  document.querySelectorAll('#authTabs [data-auth-tab]').forEach(b => b.classList.toggle('active', b.dataset.authTab === which));
+  authMsg('');
+  icons();
+}
+
+let routing = null;
+function route() { routing = (routing || Promise.resolve()).then(doRoute).catch(e => console.error(e)); return routing; }
+async function doRoute() {
+  if (Store === GitHubStore && !GitHubStore.hasConfig()) { showView('authView'); if (!['setup', 'done'].includes(currentAuth)) showAuthForm('choice'); return; }
+  let session = null;
+  try { session = await Store.getSession(); }
+  catch (e) { console.error(e); showView('authView'); showAuthForm('signin'); authMsg(e.message || String(e), 'error'); return; }
+  if (!session) { state.me = null; state.user = null; showView('authView'); showAuthForm(['signin', 'signup', 'done'].includes(currentAuth) ? currentAuth : 'signin'); return; }
+  state.user = session.user;
+  let me = null;
+  try { me = await Store.getProfile(session.user.id); } catch (e) { console.error(e); }
+  if (!me) {
+    showView('pendingView');
+    $('pendingMsg').textContent = 'Signed in, but no profile was found. Make sure the database setup SQL has been run, then click "Check again".';
+    return;
+  }
+  state.me = me;
+  if (!me.approved) {
+    showView('pendingView');
+    $('pendingMsg').textContent = `Your account (${me.email}) is created. An admin needs to approve it before you can access the work log.`;
+    return;
+  }
+  enterApp();
+}
+
+async function enterApp() {
+  showView('appView');
+  $('userAvatar').textContent = initials(myName() || state.me.email);
+  $('userName').textContent = myName() || state.me.email;
+  $('userRole').textContent = state.me.role;
+  $('userMenuName').textContent = myName() || '—';
+  $('userMenuEmail').textContent = state.me.email || '';
+  $('tabTeamBtn').classList.toggle('hidden', !isAdmin());
+  document.querySelectorAll('[data-needs-edit]').forEach(b => b.classList.toggle('hidden', !canEdit()));
+  await loadData();
+  if (!state.subscribed) {
+    state.subscribed = true;
+    Store.subscribe(scheduleReload, setLive);
+  }
+  switchTab(state.tab === 'team' && !isAdmin() ? 'dashboard' : state.tab);
+}
+
+function setLive(status) {
+  const dot = $('liveDot'), txt = $('liveText'), b = $('liveBadge');
+  if (status === 'SUBSCRIBED' || status === 'SYNCED') { dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-dot'; txt.textContent = status === 'SYNCED' ? 'Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Live'; b.className = b.className.replace(/bg-\S+ text-\S+ border-\S+/, 'bg-emerald-50 text-emerald-700 border-emerald-200'); }
+  else if (status === 'LOCAL') { dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-500'; txt.textContent = 'Demo · this browser'; b.className = b.className.replace(/bg-\S+ text-\S+ border-\S+/, 'bg-amber-50 text-amber-700 border-amber-200'); }
+  else { dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-500'; txt.textContent = 'Sync error'; b.className = b.className.replace(/bg-\S+ text-\S+ border-\S+/, 'bg-rose-50 text-rose-700 border-rose-200'); }
+}
+
+let reloadTimer = null;
+function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(loadData, 400); }
+
+async function loadData() {
+  try {
+    const [issues, profiles] = await Promise.all([Store.listIssues(), Store.listProfiles().catch(() => [])]);
+    state.issues = (issues || []).map(i => ({ ...i, tags: i.tags || [] }));
+    state.profiles = profiles || [];
+    const mine = state.profiles.find(p => p.id === state.me?.id);
+    if (mine) {
+      const roleChanged = mine.role !== state.me.role || mine.approved !== state.me.approved;
+      state.me = mine;
+      if (!mine.approved) { route(); return; }
+      if (roleChanged) { enterApp(); return; }
+    }
+    renderAll();
+  } catch (e) {
+    console.error(e);
+    toast('Could not load data', e.message || String(e), true);
+  }
+}
+
+/* =====================================================================
+   RENDERING
+   ===================================================================== */
+function renderAll() {
+  $('badgeLog').textContent = state.issues.length;
+  $('badgeReports').textContent = state.issues.filter(i => i.tags.includes('Report')).length;
+  const pending = state.profiles.filter(p => !p.approved).length;
+  $('badgePending').textContent = pending;
+  $('badgePending').classList.toggle('hidden', !pending);
+  fillDatalists();
+  if (state.tab === 'dashboard') renderDashboard();
+  if (state.tab === 'log') renderLog();
+  if (state.tab === 'reports') renderReports();
+  if (state.tab === 'team') renderTeam();
+}
+
+function switchTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  ['dashboard', 'log', 'reports', 'team'].forEach(t => $('view-' + t).classList.toggle('hidden', t !== tab));
+  renderAll();
+}
+
+const tagChip = (t) => {
+  const s = CAT_STYLE[t];
+  return `<span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold border ${s ? s.chip : 'bg-slate-50 text-slate-600 border-slate-200'}">${esc(t)}</span>`;
+};
+const statusPill = (s) => `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${STATUS_STYLE[s] || STATUS_STYLE['Not Started']}">${esc(s || 'Not Started')}</span>`;
+const yesNo = (v, onCls) => v ? `<span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${onCls}">Yes</span>` : `<span class="text-slate-300 text-[11px]">—</span>`;
+
+function etaCell(i) {
+  if (!i.eta) return '<span class="text-slate-300">—</span>';
+  if (isOverdue(i)) return `<div class="font-mono text-[11px] text-rose-600 font-semibold">${esc(fmtDate(i.eta))}</div><div class="text-[10px] text-rose-500">overdue ${daysBetween(i.eta, todayStr())}d</div>`;
+  if (isDone(i.status) && i.actual_completion_date && i.actual_completion_date > i.eta) return `<div class="font-mono text-[11px] text-slate-600">${esc(fmtDate(i.eta))}</div><div class="text-[10px] text-amber-600">late ${daysBetween(i.eta, i.actual_completion_date)}d</div>`;
+  return `<span class="font-mono text-[11px] text-slate-600">${esc(fmtDate(i.eta))}</span>`;
+}
+
+/* ---------- Dashboard ---------- */
+function kpiCard(label, value, sub, color, icon) {
+  return `<div class="bg-white border-t-4 border border-slate-200 rounded-xl p-3.5 shadow-sm" style="border-top-color:${color}">
+    <div class="flex items-center justify-between text-slate-500 text-[11px] font-semibold uppercase tracking-wider"><span>${label}</span><i data-lucide="${icon}" class="w-4 h-4" style="color:${color}"></i></div>
+    <div class="mt-2 text-2xl font-extrabold text-slate-900 font-mono">${value}</div>
+    <div class="text-[10px] text-slate-400 mt-1">${sub}</div></div>`;
+}
+
+function renderDashboard() {
+  const I = state.issues, open = I.filter(i => !isDone(i.status));
+  const done = I.length - open.length;
+  const urgent = open.filter(i => i.is_urgent).length;
+  const overdue = open.filter(isOverdue).length;
+  const ready = I.filter(i => i.ready_for_deployment && !['Deployed', 'Closed'].includes(i.status)).length;
+  const hours = I.reduce((s, i) => s + (Number(i.hours_taken) || 0), 0);
+  $('kpiGrid').innerHTML = [
+    kpiCard('Total logs', I.length, `${done} completed`, '#2563eb', 'list-checks'),
+    kpiCard('Open', open.length, `${I.length ? Math.round(done / I.length * 100) : 0}% completion`, '#6366f1', 'loader'),
+    kpiCard('Urgent', urgent, 'open & flagged urgent', '#e11d48', 'flame'),
+    kpiCard('Overdue', overdue, 'open past ETA', '#f59e0b', 'clock-alert'),
+    kpiCard('Ready to deploy', ready, 'awaiting deployment', '#0d9488', 'rocket'),
+    kpiCard('Hours logged', fmtHours(hours), 'across all logs', '#64748b', 'timer'),
+  ].join('');
+
+  $('catCards').innerHTML = CATEGORY_TAGS.map(c => {
+    const rows = I.filter(i => i.tags.includes(c)), d = rows.filter(i => isDone(i.status)).length;
+    const pct = rows.length ? Math.round(d / rows.length * 100) : 0, st = CAT_STYLE[c];
+    const u = rows.filter(i => i.is_urgent && !isDone(i.status)).length;
+    return `<button data-goto-cat="${c}" class="text-left bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition-all">
+      <div class="flex items-center justify-between">
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold border ${st.chip}"><i data-lucide="${st.icon}" class="w-3.5 h-3.5"></i>${c}</span>
+        <span class="text-[11px] text-slate-400">${u ? `<span class="text-rose-600 font-semibold">${u} urgent</span> · ` : ''}${rows.length - d} open</span>
+      </div>
+      <div class="mt-3 flex items-end justify-between"><span class="text-2xl font-extrabold font-mono text-slate-900">${rows.length}</span><span class="text-[11px] text-slate-500">${pct}% done</span></div>
+      <div class="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${st.bar}"></div></div>
+    </button>`;
+  }).join('');
+
+  const attn = open.filter(i => i.is_urgent || isOverdue(i)).sort((a, b) => (b.is_urgent - a.is_urgent) || String(a.eta || '9').localeCompare(String(b.eta || '9'))).slice(0, 12);
+  $('attentionList').innerHTML = attn.length ? attn.map(i => `
+    <button data-open="${i.sl_no}" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-start gap-3">
+      <span class="font-mono text-[11px] text-slate-400 pt-0.5">#${i.sl_no}</span>
+      <span class="flex-1 min-w-0">
+        <span class="block text-xs font-medium text-slate-800 truncate">${esc(i.description)}</span>
+        <span class="flex flex-wrap items-center gap-1 mt-1">${i.is_urgent ? '<span class="text-[10px] font-bold text-rose-600">URGENT</span>' : ''}${isOverdue(i) ? `<span class="text-[10px] font-bold text-amber-600">OVERDUE ${daysBetween(i.eta, todayStr())}d</span>` : ''}<span class="text-[10px] text-slate-400">${esc(i.consultant || 'Unassigned')}</span></span>
+      </span>
+      ${statusPill(i.status)}
+    </button>`).join('') : `<div class="p-8 text-center text-xs text-slate-400">Nothing urgent or overdue. 🎉</div>`;
+  icons();
+  renderCharts();
+}
+
+function renderCharts() {
+  if (!window.Chart) return;
+  Object.values(state.charts).forEach(c => c && c.destroy());
+  const I = state.issues;
+  const sCounts = STATUSES.map(s => I.filter(i => (i.status || 'Not Started') === s).length);
+  state.charts.status = new Chart($('chartStatus'), {
+    type: 'doughnut',
+    data: { labels: STATUSES, datasets: [{ data: sCounts, backgroundColor: STATUSES.map(s => STATUS_COLOR[s]), borderWidth: 2, borderColor: '#fff' }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
+  });
+  const names = uniq(I.map(i => i.consultant || 'Unassigned')).sort();
+  state.charts.workload = new Chart($('chartWorkload'), {
+    type: 'bar',
+    data: { labels: names, datasets: CATEGORY_TAGS.map(c => ({ label: c + ' (open)', data: names.map(n => I.filter(i => (i.consultant || 'Unassigned') === n && i.tags.includes(c) && !isDone(i.status)).length), backgroundColor: CAT_STYLE[c].bar, borderRadius: 3 }))
+      .concat([{ label: 'Completed', data: names.map(n => I.filter(i => (i.consultant || 'Unassigned') === n && isDone(i.status)).length), backgroundColor: '#cbd5e1', borderRadius: 3 }]) },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+  state.charts.hours = new Chart($('chartHours'), {
+    type: 'bar',
+    data: { labels: names, datasets: CATEGORY_TAGS.map(c => ({ label: c, data: names.map(n => I.filter(i => (i.consultant || 'Unassigned') === n && i.tags.includes(c)).reduce((s, i) => s + (Number(i.hours_taken) || 0), 0)), backgroundColor: CAT_STYLE[c].bar, borderRadius: 3 })) },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, scales: { x: { stacked: true, beginAtZero: true, title: { display: true, text: 'Hours', font: { size: 10 } } }, y: { stacked: true, ticks: { font: { size: 10 } } } } }
+  });
+}
+
+/* ---------- Work log ---------- */
+const LOG_COLS = [
+  ['sl_no', 'Sl No'], ['description', 'Description'], ['area', 'Area'], ['type', 'Type'], ['status', 'Status'],
+  ['ready_for_deployment', 'Ready for Deployment'], ['owner', 'Owner of Ticket'], ['consultant', 'Consultant in Charge'],
+  ['eta', 'ETA'], ['actual_completion_date', 'Actual Completion'], ['comments', 'Comments'], ['is_urgent', 'Urgent'], ['hours_taken', 'Hours'], [null, ''],
+];
+
+function filteredLog() {
+  const f = state.f, q = f.search.toLowerCase().trim(), me = myName();
+  let rows = state.issues.filter(i => {
+    if (state.cat !== 'All' && !i.tags.includes(state.cat)) return false;
+    if (f.tags.size && !i.tags.some(t => f.tags.has(t))) return false;
+    if (f.status.size && !f.status.has(i.status)) return false;
+    if (f.type.size && !f.type.has(i.type)) return false;
+    if (f.consultant.size && !f.consultant.has(i.consultant)) return false;
+    if (f.urgent && !i.is_urgent) return false;
+    if (f.ready && !i.ready_for_deployment) return false;
+    if (f.open && isDone(i.status)) return false;
+    if (f.mine && !(i.consultant === me || i.created_by === state.me?.id)) return false;
+    if (q) {
+      const hay = [i.sl_no, i.description, i.area, i.owner, i.consultant, i.comments, i.type, i.report_tech, ...i.tags].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const { key, dir } = state.sort, m = dir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    let x = a[key], y = b[key];
+    if (key === 'status') { x = STATUSES.indexOf(x); y = STATUSES.indexOf(y); }
+    if (typeof x === 'boolean' || typeof y === 'boolean') { x = x ? 1 : 0; y = y ? 1 : 0; }
+    if (key === 'hours_taken' || key === 'sl_no') { x = Number(x) || 0; y = Number(y) || 0; }
+    if (x == null || x === '') return 1; if (y == null || y === '') return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * m;
+  });
+  return rows;
+}
+
+function renderLog() {
+  // Category bar
+  const counts = { All: state.issues.length };
+  CATEGORY_TAGS.forEach(c => counts[c] = state.issues.filter(i => i.tags.includes(c)).length);
+  $('catBar').innerHTML = ['All', ...CATEGORY_TAGS].map(c => {
+    const st = CAT_STYLE[c];
+    return `<button data-cat="${c}" class="cat-btn ${state.cat === c ? 'active' : ''} px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:border-slate-400 flex items-center gap-1.5 shadow-sm">
+      ${st ? `<i data-lucide="${st.icon}" class="w-3.5 h-3.5"></i>` : ''}${c}<span class="px-1.5 rounded-full text-[10px] bg-slate-100 text-slate-600 font-bold">${counts[c]}</span></button>`;
+  }).join('');
+
+  document.querySelectorAll('.flag-btn').forEach(b => {
+    const on = state.f[b.dataset.flag];
+    b.classList.toggle('bg-indigo-600', on); b.classList.toggle('text-white', on); b.classList.toggle('border-indigo-600', on);
+    b.classList.toggle('bg-slate-50', !on);
+  });
+  renderMS();
+
+  $('logHead').innerHTML = LOG_COLS.map(([k, label]) => {
+    const arrow = state.sort.key === k ? (state.sort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+    const cls = { description: 'min-w-[260px]', comments: 'min-w-[180px]', hours_taken: 'text-right', is_urgent: 'text-center', ready_for_deployment: 'text-center' }[k] || '';
+    return `<th class="px-3 py-3 whitespace-nowrap ${cls}" ${k ? `data-sort="${k}"` : ''}>${label}${arrow}</th>`;
+  }).join('');
+
+  const rows = filteredLog(), editable = canEdit();
+  $('logEmpty').classList.toggle('hidden', rows.length > 0);
+  $('logBody').innerHTML = rows.map(i => `
+    <tr class="hover:bg-slate-50/80 ${i.is_urgent && !isDone(i.status) ? 'bg-rose-50/40' : ''}">
+      <td class="px-3 py-2.5 font-mono font-bold text-slate-500 whitespace-nowrap">#${i.sl_no}</td>
+      <td class="px-3 py-2.5">
+        <button data-open="${i.sl_no}" class="text-left text-slate-800 font-medium hover:text-indigo-700 clamp-2" title="${esc(i.description)}">${esc(i.description)}</button>
+        <div class="flex flex-wrap gap-1 mt-1">${i.tags.map(tagChip).join('')}${i.report_tech ? `<span class="text-[10px] text-purple-600 font-mono">· ${esc(i.report_tech)}</span>` : ''}</div>
+      </td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${esc(i.area || '—')}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${esc(i.type || '—')}</td>
+      <td class="px-3 py-2.5">
+        <select data-inline="status" data-sl="${i.sl_no}" ${editable ? '' : 'disabled'} class="text-[11px] font-semibold px-2 py-1 rounded-full border ${STATUS_STYLE[i.status] || STATUS_STYLE['Not Started']} focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer">
+          ${STATUSES.map(s => `<option ${s === i.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="px-3 py-2.5 text-center">
+        <button data-toggle="ready_for_deployment" data-sl="${i.sl_no}" ${editable ? '' : 'disabled'} title="Toggle ready for deployment" class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${i.ready_for_deployment ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-white text-slate-400 border-slate-200 hover:border-teal-300'}">${i.ready_for_deployment ? 'Yes' : 'No'}</button>
+      </td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${esc(i.owner || '—')}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap">
+        <span class="inline-flex items-center gap-1.5"><span class="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-indigo-700 flex items-center justify-center text-[9px] font-bold uppercase">${esc(initials(i.consultant || 'U'))}</span><span class="font-medium text-slate-700">${esc(i.consultant || 'Unassigned')}</span></span>
+      </td>
+      <td class="px-3 py-2.5 whitespace-nowrap">${etaCell(i)}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap font-mono text-[11px] text-slate-600">${i.actual_completion_date ? esc(fmtDate(i.actual_completion_date)) : '<span class="text-slate-300">—</span>'}</td>
+      <td class="px-3 py-2.5 text-[11px] text-slate-500 italic"><span class="clamp-2" title="${esc(i.comments)}">${esc(i.comments || '—')}</span></td>
+      <td class="px-3 py-2.5 text-center">
+        <button data-toggle="is_urgent" data-sl="${i.sl_no}" ${editable ? '' : 'disabled'} title="Toggle urgent" class="p-1 rounded-md ${i.is_urgent ? 'text-rose-600 bg-rose-50' : 'text-slate-300 hover:text-rose-400'}"><i data-lucide="flame" class="w-4 h-4"></i></button>
+      </td>
+      <td class="px-3 py-2.5 text-right font-mono text-[11px] text-slate-700">${fmtHours(i.hours_taken)}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-right">
+        <button data-open="${i.sl_no}" title="${editable ? 'Edit' : 'View'}" class="p-1 text-slate-500 hover:text-indigo-600 rounded hover:bg-slate-100"><i data-lucide="${editable ? 'edit-3' : 'eye'}" class="w-3.5 h-3.5"></i></button>
+        ${canDelete(i) ? `<button data-delete="${i.sl_no}" title="Delete" class="p-1 text-slate-500 hover:text-rose-600 rounded hover:bg-slate-100"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>` : ''}
+      </td>
+    </tr>`).join('');
+  const hrs = rows.reduce((s, i) => s + (Number(i.hours_taken) || 0), 0);
+  $('logFooter').innerHTML = `Showing <b>${rows.length}</b> of ${state.issues.length} logs · <b>${fmtHours(hrs)}</b> hours · ${rows.filter(i => !isDone(i.status)).length} open`;
+  icons();
+}
+
+/* ---------- Multi-select filters ---------- */
+const MS = {
+  tags: { label: 'Tags', opts: () => extraTags() },
+  status: { label: 'Status', opts: () => STATUSES },
+  type: { label: 'Type', opts: () => TYPES },
+  consultant: { label: 'Consultant', opts: () => consultantNames() },
+};
+let msOpen = null;
+function renderMS() {
+  document.querySelectorAll('[data-ms]').forEach(el => {
+    const key = el.dataset.ms, cfg = MS[key], sel = state.f[key];
+    const lbl = sel.size === 0 ? 'All' : sel.size === 1 ? [...sel][0] : `${sel.size} selected`;
+    el.innerHTML = `
+      <button type="button" data-ms-toggle="${key}" class="px-3 py-1.5 bg-slate-50 border ${sel.size ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300'} rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-100 flex items-center gap-1.5">
+        <span class="text-slate-400">${cfg.label}:</span><span class="font-semibold text-slate-800 max-w-[110px] truncate">${esc(lbl)}</span><i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-500"></i>
+      </button>
+      <div class="${msOpen === key ? '' : 'hidden'} absolute z-30 mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-lg p-2 text-xs">
+        <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 text-[11px]">
+          <span class="font-bold text-slate-700">Filter ${cfg.label}</span>
+          <button type="button" data-ms-clear="${key}" class="text-slate-500 hover:underline">Clear</button>
+        </div>
+        <div class="max-h-56 overflow-y-auto custom-scrollbar space-y-0.5">
+          ${cfg.opts().map(o => `<label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 cursor-pointer select-none"><input type="checkbox" data-ms-opt="${key}" value="${esc(o)}" ${sel.has(o) ? 'checked' : ''} class="rounded text-indigo-600 w-3.5 h-3.5" /><span class="truncate">${esc(o)}</span></label>`).join('')}
+        </div>
+      </div>`;
+  });
+  icons();
+}
+
+/* ---------- Reports ---------- */
+const reportNature = (i) => i.type === 'Fresh Development' ? 'New Report' : i.type === 'Issue' ? 'Report Issue' : (i.type || 'Unspecified');
+const natureBadge = (n) => {
+  const cls = n === 'New Report' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : n === 'Report Issue' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-200';
+  const ic = n === 'New Report' ? 'sparkles' : n === 'Report Issue' ? 'bug' : 'wrench';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${cls}"><i data-lucide="${ic}" class="w-3 h-3"></i>${esc(n)}</span>`;
+};
+
+function renderReports() {
+  const all = state.issues.filter(i => i.tags.includes('Report'));
+  const nNew = all.filter(i => i.type === 'Fresh Development').length, nIss = all.filter(i => i.type === 'Issue').length;
+  $('repKpis').innerHTML = [
+    kpiCard('Report items', all.length, `${all.filter(i => !isDone(i.status)).length} open`, '#9333ea', 'file-bar-chart'),
+    kpiCard('New reports', nNew, 'fresh development', '#4f46e5', 'sparkles'),
+    kpiCard('Report issues', nIss, `${all.filter(i => i.type === 'Issue' && !isDone(i.status)).length} still open`, '#e11d48', 'bug'),
+    kpiCard('Enhancements & other', all.length - nNew - nIss, 'changes to existing reports', '#64748b', 'wrench'),
+  ].join('');
+  const segs = [['All', 'All'], ['New Report', 'New reports'], ['Report Issue', 'Report issues'], ['Other', 'Enhancements / other']];
+  $('repSeg').innerHTML = segs.map(([k, l]) => `<button data-rep-nature="${k}" class="seg-btn ${state.rep.nature === k ? 'active' : ''} px-3 py-1 rounded-md text-slate-600">${l}</button>`).join('');
+  const techs = uniq([...REPORT_TECH, ...all.map(i => i.report_tech)]);
+  $('repTech').innerHTML = `<option value="">All technologies</option>` + techs.map(t => `<option ${state.rep.tech === t ? 'selected' : ''}>${esc(t)}</option>`).join('');
+
+  const q = state.rep.search.toLowerCase().trim();
+  const rows = all.filter(i => {
+    const n = reportNature(i);
+    if (state.rep.nature === 'Other' && (n === 'New Report' || n === 'Report Issue')) return false;
+    if (!['All', 'Other'].includes(state.rep.nature) && n !== state.rep.nature) return false;
+    if (state.rep.tech && i.report_tech !== state.rep.tech) return false;
+    if (state.rep.open && isDone(i.status)) return false;
+    if (q && ![i.sl_no, i.description, i.area, i.owner, i.consultant, i.comments, i.report_tech].join(' ').toLowerCase().includes(q)) return false;
+    return true;
+  });
+  $('repEmpty').classList.toggle('hidden', rows.length > 0);
+  $('repBody').innerHTML = rows.map(i => `
+    <tr class="hover:bg-slate-50/80">
+      <td class="px-3 py-2.5 font-mono font-bold text-purple-700">#${i.sl_no}</td>
+      <td class="px-3 py-2.5"><button data-open="${i.sl_no}" class="text-left font-medium text-slate-800 hover:text-purple-700 clamp-2">${esc(i.description)}</button>
+        <div class="flex flex-wrap gap-1 mt-1">${i.tags.filter(t => t !== 'Report').map(tagChip).join('')}</div></td>
+      <td class="px-3 py-2.5">${natureBadge(reportNature(i))}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap font-mono text-[11px] text-slate-600">${esc(i.report_tech || '—')}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${esc(i.area || '—')}</td>
+      <td class="px-3 py-2.5">${statusPill(i.status)}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap font-medium text-slate-700">${esc(i.consultant || 'Unassigned')}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">${esc(i.owner || '—')}</td>
+      <td class="px-3 py-2.5 whitespace-nowrap">${etaCell(i)}</td>
+      <td class="px-3 py-2.5 text-center">${yesNo(i.ready_for_deployment, 'bg-teal-50 text-teal-700 border-teal-200')}</td>
+      <td class="px-3 py-2.5 text-center">${yesNo(i.is_urgent, 'bg-rose-50 text-rose-700 border-rose-200')}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-[11px]">${fmtHours(i.hours_taken)}</td>
+    </tr>`).join('');
+  icons();
+}
+
+/* ---------- Team ---------- */
+function renderTeam() {
+  if (!isAdmin()) return;
+  const rows = [...state.profiles].sort((a, b) => (a.approved - b.approved) || String(a.full_name).localeCompare(String(b.full_name)));
+  $('teamBody').innerHTML = rows.map(p => {
+    const self = p.id === state.me.id;
+    const openCount = state.issues.filter(i => i.consultant === p.full_name && !isDone(i.status)).length;
+    return `<tr class="${p.approved ? '' : 'bg-amber-50/50'}">
+      <td class="px-4 py-2.5"><span class="inline-flex items-center gap-2"><span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center uppercase">${esc(initials(p.full_name || p.email))}</span><span class="font-semibold text-slate-800">${esc(p.full_name || '—')}</span>${self ? '<span class="text-[10px] text-slate-400">(you)</span>' : ''}</span></td>
+      <td class="px-4 py-2.5 text-slate-600">${esc(p.email)}</td>
+      <td class="px-4 py-2.5"><select data-role="${esc(p.id)}" ${self ? 'disabled' : ''} class="text-xs px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg">${['admin', 'consultant', 'viewer'].map(r => `<option ${p.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select></td>
+      <td class="px-4 py-2.5">${p.approved
+        ? `<button data-approve="${esc(p.id)}" data-val="false" ${self ? 'disabled' : ''} class="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200">Approved</button>`
+        : `<button data-approve="${esc(p.id)}" data-val="true" class="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white">Approve</button>`}</td>
+      <td class="px-4 py-2.5 text-right font-mono">${openCount}</td>
+      <td class="px-4 py-2.5 text-right"><button data-resetpw="${esc(p.id)}" class="text-[11px] font-semibold text-indigo-600 hover:underline">Reset</button></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No users yet.</td></tr>`;
+}
+
+/* =====================================================================
+   ISSUE MODAL
+   ===================================================================== */
+function fillSelect(el, opts, value, blank) {
+  el.innerHTML = (blank != null ? `<option value="">${blank}</option>` : '') + opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+  if (value != null && value !== '' && !opts.includes(value)) el.insertAdjacentHTML('beforeend', `<option value="${esc(value)}">${esc(value)}</option>`);
+  el.value = value ?? '';
+}
+function fillDatalists() {
+  $('areaList').innerHTML = uniq([...AREAS, ...state.issues.map(i => i.area)]).map(a => `<option value="${esc(a)}">`).join('');
+  $('ownerList').innerHTML = uniq(state.issues.map(i => i.owner)).map(a => `<option value="${esc(a)}">`).join('');
+}
+function renderTagPickers(selected) {
+  $('fCategory').innerHTML = CATEGORY_TAGS.map(c => `
+    <label class="tag-pick cursor-pointer"><input type="checkbox" class="sr-only" name="cat" value="${c}" ${selected.includes(c) ? 'checked' : ''} />
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${CAT_STYLE[c].chip}"><i data-lucide="${CAT_STYLE[c].icon}" class="w-3.5 h-3.5"></i>${c}</span></label>`).join('');
+  const extras = uniq([...extraTags(), ...selected.filter(t => !CATEGORY_TAGS.includes(t))]);
+  $('fTags').innerHTML = extras.map(t => `
+    <label class="tag-pick cursor-pointer"><input type="checkbox" class="sr-only" name="tag" value="${esc(t)}" ${selected.includes(t) ? 'checked' : ''} />
+      <span class="inline-flex px-2 py-1 rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:border-slate-400">${esc(t)}</span></label>`).join('');
+  icons();
+  syncReportTech();
+}
+function syncReportTech() {
+  const isRep = !!document.querySelector('#fCategory input[value="Report"]:checked');
+  $('fReportTechWrap').classList.toggle('hidden', !isRep);
+}
+function selectedTags() { return [...document.querySelectorAll('#fCategory input:checked, #fTags input:checked')].map(i => i.value); }
+
+async function openIssue(sl = null, preset = {}) {
+  const i = sl != null ? state.issues.find(x => x.sl_no === Number(sl)) : null;
+  if (sl != null && !i) return;
+  state.editing = i;
+  const d = i || { tags: [], type: 'Issue', status: 'Not Started', consultant: myName(), ...preset };
+  const ro = !canEdit();
+  $('modalTitle').textContent = i ? (ro ? 'View log' : 'Edit log') : 'New log';
+  $('modalSl').textContent = i ? `#${i.sl_no}` : '';
+  renderTagPickers(d.tags || []);
+  $('fDescription').value = d.description || '';
+  $('fArea').value = d.area || '';
+  fillSelect($('fType'), TYPES, d.type || '', '— Select —');
+  fillSelect($('fReportTech'), REPORT_TECH, d.report_tech || '', '— Select —');
+  fillSelect($('fStatus'), STATUSES, d.status || 'Not Started');
+  fillSelect($('fConsultant'), consultantNames(), d.consultant || '', 'Unassigned');
+  $('fOwner').value = d.owner || '';
+  $('fEta').value = d.eta || '';
+  $('fActual').value = d.actual_completion_date || '';
+  $('fHours').value = d.hours_taken ?? '';
+  $('fUrgent').checked = !!d.is_urgent;
+  $('fReady').checked = !!d.ready_for_deployment;
+  $('fComments').value = d.comments || '';
+  $('formError').classList.add('hidden');
+  $('btnDeleteIssue').classList.toggle('hidden', !(i && canDelete(i)));
+  $('btnSaveIssue').classList.toggle('hidden', ro);
+  $('formIssue').querySelectorAll('input, select, textarea').forEach(el => el.disabled = ro);
+  $('btnAddTag').disabled = ro;
+  $('modalIssue').classList.remove('hidden');
+  icons();
+  setTimeout(() => !ro && $('fDescription').focus(), 50);
+
+  $('activityWrap').classList.toggle('hidden', !i);
+  if (i) {
+    $('activityList').innerHTML = '<div class="px-3 py-2 text-slate-400">Loading…</div>';
+    try {
+      const acts = await Store.listActivity(i.sl_no);
+      const label = (f) => ({ ready_for_deployment: 'ready for deployment', is_urgent: 'urgent', actual_completion_date: 'actual completion', hours_taken: 'hours', eta: 'ETA' }[f] || f);
+      const val = (v) => v == null || v === '' ? '—' : v === 'true' ? 'Yes' : v === 'false' ? 'No' : v;
+      $('activityList').innerHTML = acts.length ? acts.map(a => `<div class="px-3 py-1.5 flex gap-2"><span class="text-slate-400 font-mono whitespace-nowrap">${esc(fmtDateTime(a.changed_at))}</span><span class="text-slate-600"><b class="text-slate-800">${esc(a.changed_by_name || 'Someone')}</b> ${a.field === 'created' ? 'created this log' : `changed ${esc(label(a.field))}: <span class="text-slate-400">${esc(val(a.old_value))}</span> → <b>${esc(val(a.new_value))}</b>`}</span></div>`).join('') : '<div class="px-3 py-2 text-slate-400">No activity recorded yet.</div>';
+    } catch (e) { $('activityList').innerHTML = '<div class="px-3 py-2 text-slate-400">Activity unavailable.</div>'; }
+  }
+}
+function closeIssue() { $('modalIssue').classList.add('hidden'); state.editing = null; }
+
+async function saveIssue(e) {
+  e.preventDefault();
+  if (!canEdit()) return;
+  const tags = selectedTags();
+  const row = {
+    description: $('fDescription').value.trim(), tags, area: $('fArea').value.trim(), type: $('fType').value,
+    report_tech: tags.includes('Report') ? $('fReportTech').value : '', status: $('fStatus').value, owner: $('fOwner').value.trim(),
+    consultant: $('fConsultant').value, eta: $('fEta').value, actual_completion_date: $('fActual').value,
+    hours_taken: $('fHours').value, is_urgent: $('fUrgent').checked, ready_for_deployment: $('fReady').checked, comments: $('fComments').value.trim(),
+  };
+  const err = !row.description ? 'Description is required.' : !tags.some(t => CATEGORY_TAGS.includes(t)) ? 'Pick at least one category: Development, Support or Report.' : Number(row.hours_taken) < 0 ? 'Hours cannot be negative.' : '';
+  if (err) { $('formError').textContent = err; $('formError').classList.remove('hidden'); return; }
+  if (isDone(row.status) && !row.actual_completion_date) row.actual_completion_date = todayStr();
+
+  const btn = $('btnSaveIssue'); btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    if (state.editing) {
+      const cur = state.editing, patch = {}, clean = cleanRow(row), before = cleanRow(cur);
+      Object.keys(clean).forEach(k => { if (JSON.stringify(clean[k] ?? null) !== JSON.stringify(before[k] ?? null)) patch[k] = clean[k]; });
+      if (Object.keys(patch).length) {
+        const upd = await Store.updateIssue(cur.sl_no, patch);
+        Object.assign(cur, upd);
+        toast('Log updated', `#${cur.sl_no} saved.`);
+      }
+    } else {
+      const rec = await Store.insertIssue(row);
+      state.issues.unshift({ ...rec, tags: rec.tags || [] });
+      toast('Log created', `#${rec.sl_no} added.`);
+    }
+    closeIssue(); renderAll();
+  } catch (ex) {
+    $('formError').textContent = ex.message || String(ex); $('formError').classList.remove('hidden');
+  } finally { btn.disabled = false; btn.textContent = 'Save log'; }
+}
+
+async function patchIssue(sl, patch) {
+  const i = state.issues.find(x => x.sl_no === sl); if (!i || !canEdit()) return;
+  if (patch.status && isDone(patch.status) && !i.actual_completion_date) patch.actual_completion_date = todayStr();
+  const backup = { ...i };
+  Object.assign(i, patch); renderAll();
+  try { Object.assign(i, await Store.updateIssue(sl, patch)); }
+  catch (e) { Object.assign(i, backup); renderAll(); toast('Update failed', e.message || String(e), true); }
+}
+
+async function deleteIssue(sl) {
+  const i = state.issues.find(x => x.sl_no === sl); if (!i) return;
+  if (!confirm(`Delete log #${sl}?\n\n"${i.description.slice(0, 120)}"\n\nThis cannot be undone.`)) return;
+  try {
+    await Store.deleteIssue(sl);
+    state.issues = state.issues.filter(x => x.sl_no !== sl);
+    closeIssue(); renderAll(); toast('Log deleted', `#${sl} removed.`);
+  } catch (e) { toast('Delete failed', e.message || String(e), true); }
+}
+
+/* =====================================================================
+   EXCEL IMPORT / EXPORT
+   ===================================================================== */
+const EXPORT_COLS = [
+  ['sl_no', 'Sl No'], ['description', 'Description'], ['tags', 'Tags'], ['area', 'Area'], ['type', 'Type'], ['report_tech', 'Report Technology'],
+  ['status', 'Status'], ['ready_for_deployment', 'Ready for Deployment'], ['owner', 'Owner of the Ticket'], ['consultant', 'Consultant in Charge'],
+  ['eta', 'ETA'], ['actual_completion_date', 'Actual Completion Date'], ['comments', 'Comments'], ['is_urgent', 'Is Urgent'], ['hours_taken', 'Hours Taken'], ['updated_at', 'Last Updated'],
+];
+function exportExcel() {
+  if (!window.XLSX) { toast('Excel library not loaded', 'Check your internet connection.', true); return; }
+  const toRow = (i) => EXPORT_COLS.map(([k]) => {
+    const v = i[k];
+    if (k === 'tags') return (v || []).join(', ');
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+    if (k === 'hours_taken') return Number(v) || 0;
+    if (k === 'updated_at') return v ? new Date(v).toLocaleString('en-GB') : '';
+    return v ?? '';
+  });
+  const wb = XLSX.utils.book_new();
+  const sheet = (rows, name) => {
+    const ws = XLSX.utils.aoa_to_sheet([EXPORT_COLS.map(c => c[1]), ...rows.map(toRow)]);
+    ws['!cols'] = EXPORT_COLS.map(([k]) => ({ wch: k === 'description' ? 60 : k === 'comments' ? 40 : 16 }));
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  };
+  const all = [...state.issues].sort((a, b) => a.sl_no - b.sl_no);
+  sheet(all, 'Work_Log');
+  CATEGORY_TAGS.forEach(c => sheet(all.filter(i => i.tags.includes(c)), c));
+  const name = `OSUS_Work_Log_${todayStr()}.xlsx`;
+  XLSX.writeFile(wb, name);
+  toast('Excel exported', name);
+}
+
+function parseExcelDate(val) {
+  if (val == null || val === '') return null;
+  if (val instanceof Date && !isNaN(val)) return new Date(val.getTime() - val.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  if (typeof val === 'number') return new Date(Date.UTC(1899, 11, 30) + val * 86400000).toISOString().slice(0, 10);
+  const s = String(val).trim(); const m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const p = Date.parse(s); return isNaN(p) ? null : new Date(p).toISOString().slice(0, 10);
+}
+const toBool = (v) => /^(y|yes|true|1|x|✓|✔|high|urgent|critical)$/i.test(String(v ?? '').trim());
+function normStatus(s) {
+  const v = String(s || '').trim().toLowerCase();
+  if (!v) return { status: 'Not Started' };
+  const exact = STATUSES.find(x => x.toLowerCase() === v); if (exact) return { status: exact };
+  if (/ready for deploy/.test(v)) return { status: 'Completed', ready: true };
+  if (/deployed|prod/.test(v)) return { status: 'Deployed' };
+  if (/developed|complete|done|resolved|fixed/.test(v)) return { status: 'Completed' };
+  if (/clarif|not clear|confirmation|pending/.test(v)) return { status: 'Pending Clarification' };
+  if (/uat|test/.test(v)) return { status: 'UAT / Testing' };
+  if (/hold|rollback|blocked/.test(v)) return { status: 'On Hold' };
+  if (/not (yet )?start|ready for dev|new|open/.test(v)) return { status: 'Not Started' };
+  if (/close/.test(v)) return { status: 'Closed' };
+  return { status: 'WIP' };
+}
+function normType(t, fallback) {
+  const v = String(t || '').trim().toLowerCase();
+  if (!v) return fallback;
+  const exact = TYPES.find(x => x.toLowerCase() === v); if (exact) return exact;
+  if (/fresh|new|develop/.test(v)) return 'Fresh Development';
+  if (/issue|bug|defect|error|incident/.test(v)) return 'Issue';
+  if (/enhance/.test(v)) return 'Enhancement';
+  if (/change/.test(v)) return 'Change Request';
+  return fallback;
+}
+
+function parseWorkbook(buf) {
+  const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+  const out = [], known = consultantNames().map(n => n.toLowerCase());
+  wb.SheetNames.forEach(name => {
+    const lname = name.toLowerCase();
+    if (/summary|lookup|notes|^sheet\d*$/.test(lname.replace(/[\s_-]/g, '')) && !/log/.test(lname)) return;
+    const data = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+    if (data.length < 2) return;
+    const h = data[0].map(x => String(x || '').toLowerCase().trim()), used = new Set();
+    const pick = (keys, exclude = []) => {
+      const idx = h.findIndex((x, i) => !used.has(i) && x && keys.some(k => x.includes(k)) && !exclude.some(k => x.includes(k)));
+      if (idx !== -1) used.add(idx); return idx;
+    };
+    const ix = {};
+    ix.sl = pick(['sl no', 'sl.no', 's.no', 'sno', 'serial']);
+    ix.ready = pick(['ready for deploy', 'is ready']);
+    ix.actual = pick(['actual', 'completion', 'completed on', 'deployed date', 'closed on']);
+    ix.eta = pick(['eta', 'etc', 'due', 'target date'], ['env']);
+    ix.tech = pick(['technology', 'tech']);
+    ix.desc = pick(['description', 'task', 'title', 'feature', 'summary', 'deliverable', 'subject', 'issue']);
+    ix.ref = pick(['ticket id', 'report id', 'ticket', 'ref', ' id'], []);
+    ix.consultant = pick(['consultant', 'in charge', 'lead', 'developer', 'member', 'assigned']);
+    ix.owner = pick(['owner', 'requestor', 'requester', 'raised by', 'stakeholder']);
+    ix.area = pick(['area', 'module']);
+    ix.tags = pick(['tag', 'category']);
+    ix.type = pick(['type', 'nature']);
+    ix.status = pick(['status', 'stage']);
+    ix.urgent = pick(['urgent', 'priority']);
+    ix.hours = pick(['hour', 'effort', 'time spent', 'time taken']);
+    ix.comments = pick(['comment', 'note', 'blocker', 'remark']);
+    if (ix.desc === -1) return;
+
+    const sheetCat = /report/.test(lname) ? 'Report' : /deploy|develop|release/.test(lname) ? 'Development' : /support|ticket|incident/.test(lname) ? 'Support' : null;
+    const sheetConsultant = known.includes(lname.trim()) ? consultantNames().find(n => n.toLowerCase() === lname.trim()) : null;
+    const g = (r, k) => ix[k] !== -1 ? r[ix[k]] : '';
+
+    for (let r = 1; r < data.length; r++) {
+      const row = data[r];
+      let desc = String(g(row, 'desc') || '').trim(); if (!desc) continue;
+      const ref = String(g(row, 'ref') || '').trim(); if (ref && !desc.includes(ref)) desc = `[${ref}] ${desc}`;
+      let tags = String(g(row, 'tags') || '').split(/[,;|]/).map(t => t.trim()).filter(Boolean)
+        .map(t => CATEGORY_TAGS.find(c => c.toLowerCase() === t.toLowerCase()) || t);
+      if (sheetCat && !tags.includes(sheetCat)) tags.unshift(sheetCat);
+      if (!tags.some(t => CATEGORY_TAGS.includes(t))) tags.unshift('Support');
+      const st = normStatus(g(row, 'status'));
+      const tech = String(g(row, 'tech') || '').trim();
+      out.push({
+        description: desc, tags: uniq(tags), area: String(g(row, 'area') || '').trim(),
+        type: normType(g(row, 'type'), sheetCat === 'Report' ? 'Fresh Development' : 'Issue'),
+        report_tech: tags.includes('Report') ? (REPORT_TECH.find(t => t.toLowerCase() === tech.toLowerCase()) || tech || null) : null,
+        status: st.status, ready_for_deployment: ix.ready !== -1 ? toBool(g(row, 'ready')) : !!st.ready,
+        owner: String(g(row, 'owner') || '').trim(), consultant: String(g(row, 'consultant') || '').trim() || sheetConsultant || null,
+        eta: parseExcelDate(g(row, 'eta')), actual_completion_date: parseExcelDate(g(row, 'actual')),
+        comments: String(g(row, 'comments') || '').trim(), is_urgent: toBool(g(row, 'urgent')), hours_taken: Number(g(row, 'hours')) || 0,
+      });
+    }
+  });
+  return out;
+}
+
+async function importExcel(file) {
+  if (!file) return;
+  try {
+    const rows = parseWorkbook(await file.arrayBuffer());
+    if (!rows.length) { toast('Nothing to import', 'No sheet had a recognisable Description / Task column.', true); return; }
+    const by = CATEGORY_TAGS.map(c => `${c}: ${rows.filter(r => r.tags.includes(c)).length}`).join(' · ');
+    if (!confirm(`Import ${rows.length} logs from "${file.name}"?\n\n${by}\n\nThey will be added as new logs (existing logs are not changed).`)) return;
+    toast('Importing…', `${rows.length} logs`);
+    await Store.bulkInsert(rows);
+    await loadData();
+    toast('Import complete', `${rows.length} logs added.`);
+  } catch (e) { console.error(e); toast('Import failed', e.message || String(e), true); }
+}
+
+/* =====================================================================
+   EVENTS
+   ===================================================================== */
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  const tab = t.closest('[data-tab]'); if (tab) { switchTab(tab.dataset.tab); return; }
+  const at = t.closest('[data-auth-tab]'); if (at) { showAuthForm(at.dataset.authTab); return; }
+  if (t.closest('[data-signout]')) { await Store.signOut(); state.issues = []; state.profiles = []; state.me = null; $('userMenu').classList.add('hidden'); route(); return; }
+  if (t.closest('#btnUserMenu')) { $('userMenu').classList.toggle('hidden'); return; }
+  if (!t.closest('#userMenuWrap')) $('userMenu').classList.add('hidden');
+
+  const msT = t.closest('[data-ms-toggle]'); if (msT) { msOpen = msOpen === msT.dataset.msToggle ? null : msT.dataset.msToggle; renderMS(); return; }
+  const msC = t.closest('[data-ms-clear]'); if (msC) { state.f[msC.dataset.msClear].clear(); renderLog(); return; }
+  if (msOpen && !t.closest('[data-ms]')) { msOpen = null; renderMS(); }
+
+  const op = t.closest('[data-open]'); if (op) { openIssue(op.dataset.open); return; }
+  const del = t.closest('[data-delete]'); if (del) { deleteIssue(Number(del.dataset.delete)); return; }
+  const tg = t.closest('[data-toggle]'); if (tg && !tg.disabled) { const sl = Number(tg.dataset.sl), i = state.issues.find(x => x.sl_no === sl); patchIssue(sl, { [tg.dataset.toggle]: !i[tg.dataset.toggle] }); return; }
+  const cat = t.closest('[data-cat]'); if (cat) { state.cat = cat.dataset.cat; renderLog(); return; }
+  const gc = t.closest('[data-goto-cat]'); if (gc) { state.cat = gc.dataset.gotoCat; switchTab('log'); return; }
+  const fl = t.closest('[data-flag]'); if (fl) { state.f[fl.dataset.flag] = !state.f[fl.dataset.flag]; renderLog(); return; }
+  const sh = t.closest('th[data-sort]'); if (sh) { const k = sh.dataset.sort; state.sort = { key: k, dir: state.sort.key === k && state.sort.dir === 'asc' ? 'desc' : 'asc' }; renderLog(); return; }
+  const rn = t.closest('[data-rep-nature]'); if (rn) { state.rep.nature = rn.dataset.repNature; renderReports(); return; }
+  if (t.closest('[data-close-modal]') || t.id === 'modalIssue') { closeIssue(); return; }
+
+  const rp = t.closest('[data-resetpw]');
+  if (rp) {
+    const pw = prompt(`Set a temporary password for ${rp.dataset.resetpw} (min 8 characters).\nShare it privately; they can change it from their user menu.`);
+    if (pw == null) return;
+    if (pw.length < 8) { toast('Password too short', 'Use at least 8 characters.', true); return; }
+    try { await Store.updateProfile(rp.dataset.resetpw, { password: pw }); toast('Password reset', rp.dataset.resetpw); } catch (ex) { toast('Could not reset password', ex.message, true); }
+    return;
+  }
+  const ap = t.closest('[data-approve]');
+  if (ap && !ap.disabled) {
+    try { await Store.updateProfile(ap.dataset.approve, { approved: ap.dataset.val === 'true' }); await loadData(); toast(ap.dataset.val === 'true' ? 'User approved' : 'Access revoked'); }
+    catch (ex) { toast('Could not update user', ex.message, true); }
+  }
+});
+
+document.addEventListener('change', async (e) => {
+  const t = e.target;
+  if (t.matches('[data-ms-opt]')) { const s = state.f[t.dataset.msOpt]; t.checked ? s.add(t.value) : s.delete(t.value); renderLog(); return; }
+  if (t.matches('[data-inline="status"]')) { patchIssue(Number(t.dataset.sl), { status: t.value }); return; }
+  if (t.matches('#fCategory input')) { syncReportTech(); return; }
+  if (t.matches('#fStatus') && isDone(t.value) && !$('fActual').value) { $('fActual').value = todayStr(); return; }
+  if (t.matches('[data-role]')) {
+    try { await Store.updateProfile(t.dataset.role, { role: t.value }); await loadData(); toast('Role updated'); }
+    catch (ex) { toast('Could not update role', ex.message, true); }
+    return;
+  }
+  if (t.id === 'repTech') { state.rep.tech = t.value; renderReports(); return; }
+  if (t.id === 'repOpenOnly') { state.rep.open = t.checked; renderReports(); return; }
+  if (t.id === 'importFile') { importExcel(t.files[0]); t.value = ''; }
+});
+
+$('logSearch').addEventListener('input', (e) => { state.f.search = e.target.value; renderLog(); });
+$('repSearch').addEventListener('input', (e) => { state.rep.search = e.target.value; renderReports(); });
+$('btnResetFilters').addEventListener('click', () => {
+  Object.keys(state.f).forEach(k => state.f[k] instanceof Set ? state.f[k].clear() : (state.f[k] = k === 'search' ? '' : false));
+  $('logSearch').value = ''; state.cat = 'All'; renderLog();
+});
+$('btnNewLog').addEventListener('click', () => openIssue(null, state.tab === 'log' && state.cat !== 'All' ? { tags: [state.cat] } : {}));
+$('btnNewReport').addEventListener('click', () => openIssue(null, { tags: ['Report'], type: state.rep.nature === 'Report Issue' ? 'Issue' : 'Fresh Development' }));
+$('btnExport').addEventListener('click', exportExcel);
+$('btnImport').addEventListener('click', () => $('importFile').click());
+$('btnPendingRefresh').addEventListener('click', route);
+$('formIssue').addEventListener('submit', saveIssue);
+$('btnDeleteIssue').addEventListener('click', () => state.editing && deleteIssue(state.editing.sl_no));
+$('btnAddTag').addEventListener('click', () => {
+  const v = $('fNewTag').value.trim().replace(/\s+/g, ' '); if (!v) return;
+  const cur = selectedTags(); const canon = CATEGORY_TAGS.find(c => c.toLowerCase() === v.toLowerCase()) || v;
+  if (!cur.includes(canon)) cur.push(canon);
+  renderTagPickers(cur); $('fNewTag').value = '';
+});
+$('fNewTag').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnAddTag').click(); } });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('modalIssue').classList.contains('hidden')) closeIssue();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && !$('modalIssue').classList.contains('hidden')) { e.preventDefault(); $('formIssue').requestSubmit(); }
+});
+
+async function withBusy(form, fn) {
+  const btn = form.querySelector('button[type="submit"]'), txt = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Please wait…'; authMsg('');
+  try { await fn(); } catch (ex) { authMsg(ex.message || String(ex), 'error'); } finally { btn.disabled = false; btn.textContent = txt; }
+}
+async function authAttempt(fn) {
+  try { await fn({ teamKey: $('teamKey').value }); }
+  catch (ex) { if (ex.code === 'NEEDS_TEAM_KEY') { $('teamKeyBox').classList.remove('hidden'); $('teamKey').focus(); } throw ex; }
+  $('teamKey').value = '';
+  await route();
+}
+$('formSignIn').addEventListener('submit', (e) => { e.preventDefault(); withBusy(e.target, () => authAttempt(o => Store.signIn($('siEmail').value.trim(), $('siPassword').value, o))); });
+$('formSignUp').addEventListener('submit', (e) => { e.preventDefault(); withBusy(e.target, () => authAttempt(o => Store.signUp($('suEmail').value.trim(), $('suPassword').value, $('suName').value.trim(), o))); });
+$('formSetup').addEventListener('submit', (e) => {
+  e.preventDefault();
+  withBusy(e.target, async () => {
+    const k1 = $('setKey').value, k2 = $('setKey2').value;
+    if (k1.length < 12) throw new Error('Use a team access key of at least 12 characters (e.g. 4 random words).');
+    if (k1 !== k2) throw new Error('The two team access keys do not match.');
+    const repo = $('setRepo').value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
+    const r = await GitHubStore.setup({ repo, path: $('setPath').value.trim() || 'OSUS_WorkLog_DB.xlsx', branch: $('setBranch').value.trim() || 'main', token: $('setToken').value.trim(), teamKey: k1 });
+    $('setToken').value = ''; $('setKey').value = ''; $('setKey2').value = '';
+    $('setupDoneMsg').textContent = r.created ? `Created ${r.path} in ${r.repo}.` : `Found ${r.path} in ${r.repo} — ${r.issues} logs, ${r.users} users.`;
+    showAuthForm('done');
+  });
+});
+$('btnDownloadCfg').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(GitHubStore.configObject(), null, 2)], { type: 'application/json' }));
+  a.download = CONFIG.CONFIG_FILE; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('btnTryDemo').addEventListener('click', () => { try { localStorage.setItem('osus_wl_mode', 'demo'); } catch {} location.reload(); });
+$('btnLeaveDemo').addEventListener('click', () => { try { localStorage.removeItem('osus_wl_mode'); } catch {} location.reload(); });
+$('btnChangePw').addEventListener('click', async () => {
+  $('userMenu').classList.add('hidden');
+  const cur = prompt('Current password'); if (cur == null) return;
+  const nw = prompt('New password (min 8 characters)'); if (nw == null) return;
+  if (nw.length < 8) { toast('Password too short', 'Use at least 8 characters.', true); return; }
+  try { await Store.changePassword(cur, nw); toast('Password changed'); } catch (ex) { toast('Could not change password', ex.message, true); }
+});
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+(async function boot() {
+  if (!window.XLSX) { $('configError').textContent = 'Could not load the Excel library. Check your internet connection and reload.'; $('configError').classList.remove('hidden'); }
+  await GitHubStore.init();
+  let mode = null; try { mode = localStorage.getItem('osus_wl_mode'); } catch {}
+  if (mode === 'demo' && !GitHubStore.hasConfig()) { Store = LocalStore; DEMO = true; $('demoBanner').classList.remove('hidden'); }
+  Store.onAuth((event) => { if (['SIGNED_IN', 'SIGNED_OUT', 'USER_UPDATED'].includes(event)) setTimeout(route, 0); });
+  await route();
+})();
+</script>
+</body>
+</html>
